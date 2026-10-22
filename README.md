@@ -1,8 +1,8 @@
 > ## ⚠️ WORK IN PROGRESS — PAS PRÊT (2026-10-22)
 > CacheForge est en développement actif. **Ne pas utiliser en production.**
 > - **Le bug 500 décrit dans la doc `.docx` (2026-10-22 02:15) est résolu.** La suite de tests isolée passe (`ISOLATED: ALL PASS`), le proxy répond en réel (38 requêtes, 18 hits, 47,4 % de hit rate, 31,0 % de tokens économisés — `logs/test_run.log`).
-> - **Non couvert / non vérifié :** `test_prefix_proxy.py` n'a pas de log de résultat explicite (seul `logs/prefix_proxy.log` existe, traces de mock OK) ; `granite_live.log` n'a pas été relu ; la doc `.docx` est **périmée** vs le code actuel (elle mentionne Python 3.11, le code tourne en 3.12.10).
-> - **Incohérence connue :** `config/cacheforge.json` a `mcp.host = 0.0.0.0` alors que `tray.py` force `127.0.0.1`. Si le tray n'écrase pas la valeur, le port MCP 8081 serait exposé sur le LAN. À corriger.
+> - **Non couvert / non vérifié :** `test_prefix_proxy.py` n'a pas de log de résultat explicite (seul `logs/prefix_proxy.log` existe, traces de mock OK) ; `granite_live.log` n'a pas été relu ; la doc `.docx` a été régénérée le 2026-10-22 14:01 et reflète l'état actuel.
+> - **Exposition réseau MCP corrigée (2026-10-22 13:59) :** `mcp.host` était `0.0.0.0` alors que `tray.py` forçait `127.0.0.1`. La config est maintenant `127.0.0.1` **et** `FastMCP` est instancié avec `host`/`port` lus de la config (le défaut SDK `127.0.0.1:8000` était ignoré par `mcp.run(transport='sse')`). Plus aucune exposition LAN.
 > - L'outil MCP `set_target_provider` a été supprimé (bak9) : le changement de provider se fait par édition de config uniquement.
 
 # 🔥 CacheForge — Proxy LLM avec cache local
@@ -132,7 +132,7 @@ pip install -r requirements.txt
 
 ## État actuel
 
-**v0.1 — cœur fonctionnel, en durcissement.** Proxy HIT/MISS stable, normaliseur à frontières de mot (plus de mutation de sous-chaînes), métriques et dashboard opérationnels, 4 outils MCP. Reste à corriger : l'incohérence `mcp.host`, la couverture de `test_prefix_proxy.py`, et la mise à jour de la doc `.docx`.
+**v0.1 — cœur fonctionnel, en durcissement.** Proxy HIT/MISS stable, normaliseur à frontières de mot (plus de mutation de sous-chaînes), métriques et dashboard opérationnels, 4 outils MCP. Bind MCP corrigé (config + code d'accord, plus d'exposition LAN). Reste à couvrir : la couverture de `test_prefix_proxy.py` et une relecture de `granite_live.log`.
 
 ---
 

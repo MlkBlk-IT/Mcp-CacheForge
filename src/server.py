@@ -319,7 +319,13 @@ def original_usage(h):
     return row
 
 # === MCP SERVER ===
-mcp = FastMCP("CacheForge")
+# Bind explicite depuis la config: mcp.run(transport='sse') seul ignorerait
+# host/port (defaut SDK 127.0.0.1:8000) et exposerait le port sur le LAN.
+mcp = FastMCP(
+    "CacheForge",
+    host=CONFIG['mcp'].get('host', '127.0.0.1'),
+    port=CONFIG['mcp'].get('port', 8081),
+)
 
 @mcp.tool()
 def get_cache_stats() -> Dict[str, Any]:
