@@ -1,0 +1,31 @@
+# CacheForge — dépendances runtime (Python 3.12.10)
+# Généré depuis venv/ pip freeze — 2026-10-22
+
+# --- Proxy HTTP / API ---
+fastapi==0.156.6
+uvicorn==0.54.0
+starlette==1.9.0
+httpx==0.28.1
+httpx-sse==0.4.3
+sse-starlette==3.5.0
+pydantic==2.14.1
+pydantic-settings==2.16.1
+python-multipart==0.0.32
+
+# --- MCP server ---
+mcp==1.30.0
+mcp-types==2.3.0
+
+# --- Normalisation ---
+pyahocorasick==2.3.1
+nltk==3.10.4
+
+# --- System tray (Windows) ---
+pystray==0.19.5
+pillow==13.0.0
+pywin32==312
+
+# --- Divers ---
+tqdm==4.67.1
+python-dotenv==1.2.4
+psutil==7.2.2

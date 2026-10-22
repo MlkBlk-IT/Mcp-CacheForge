@@ -1,0 +1,41 @@
+{
+  "proxy": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "target_provider": "http://localhost:1234/v1/chat/completions",
+    "api_key": null,
+    "timeout": 120
+  },
+  "mcp": {
+    "host": "0.0.0.0",
+    "port": 8081,
+    "transport": [
+      "stdio",
+      "sse"
+    ]
+  },
+  "cache": {
+    "db_path": "D:\\CacheForge\\db\\cache.db",
+    "max_entries": 10000,
+    "enable_semantic": false,
+    "semantic_threshold": 0.95,
+    "ttl_seconds": 86400
+  },
+  "normalization": {
+    "remove_politeness": true,
+    "canonical_synonyms": {
+      "config": "configuration",
+      "setup": "configuration",
+      "stp": "",
+      "s'il te plaît": "",
+      "please": "",
+      "can you": "",
+      "peux-tu": ""
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "D:\\CacheForge\\logs\\app.log",
+    "max_size_mb": 10
+  }
+}
