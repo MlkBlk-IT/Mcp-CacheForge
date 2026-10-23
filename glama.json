@@ -1,0 +1,17 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "name": "IcyCache",
+  "description": "Local LLM proxy with semantic cache — FastAPI + SQLite, Aho-Corasick normalization (1114 rules), 4 MCP tools, metrics dashboard. 100% CPU, 0 paid API. I SEE CACHE, I BURN CACHE.",
+  "maintainers": ["MlkBlk-IT"],
+  "category": "proxy",
+  "tags": ["cache", "llm-proxy", "semantic-cache", "local-llm", "mcp-server", "fastapi", "lm-studio", "cpu-only"],
+  "repository": "https://github.com/MlkBlk-IT/icycache",
+  "homepage": "https://github.com/MlkBlk-IT/icycache",
+  "license": "MIT",
+  "environmentVariables": [],
+  "build": {
+    "type": "python",
+    "command": "python -m pip install -e .",
+    "run": "python src/server.py --mode mcp-sse"
+  }
+}
