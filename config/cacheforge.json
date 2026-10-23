@@ -2,7 +2,7 @@
   "proxy": {
     "host": "127.0.0.1",
     "port": 8080,
-    "target_provider": "http://localhost:1234/v1/chat/completions",
+    "target_provider": "http://localhost:20128/v1/chat/completions",
     "api_key": null,
     "timeout": 120
   },

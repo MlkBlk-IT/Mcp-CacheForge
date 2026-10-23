@@ -33,7 +33,7 @@ p.add_run("2026-10-22\n")
 p.add_run("Auteur : ").bold = True
 p.add_run("Malik (MlkBlk-IT)")
 p.add_run("\nDepot : ").bold = True
-p.add_run("https://github.com/MlkBlk-IT/CacheForge")
+p.add_run("https://github.com/MlkBlk-IT/Mcp-CacheForge")
 
 # --- 1. Problematique ---
 doc.add_heading("1. Problematique", level=1)

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """CacheForge Tray Launcher v2 — background, zéro console, logs fichier"""
-import sys, os, threading, time, webbrowser, traceback
+import sys, os, threading, time, webbrowser, traceback, subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(r"D:\CacheForge")
 LOG = PROJECT_ROOT / "logs" / "tray.log"
 LOG.parent.mkdir(parents=True, exist_ok=True)
+
+# Python Hermes venv (avec fastapi, uvicorn, etc.)
+HERMES_PYTHON = r"C:\Users\Tech\AppData\Local\hermes\installs\a65205c14fe510d7\environments\84a2ffad63d74ec3be33cf20c82a7b7d\venv\Scripts\pythonw.exe"
 
 # CRITIQUE: sous pythonw.exe sys.stdout/stderr = None -> redirect AVANT tout import
 _logf = open(LOG, "a", encoding="utf-8", buffering=1)
@@ -53,26 +56,40 @@ def main():
         time.sleep(0.5)
     log(f"PROXY 8080 UP: {port_up(8080)} | MCP 8081 UP: {port_up(8081)}")
 
+    # Tray en thread séparé pour ne pas bloquer le main
+    def run_tray():
+        try:
+            import pystray
+            from PIL import Image, ImageDraw
+            img = Image.new("RGB", (64, 64), (30, 30, 30))
+            d = ImageDraw.Draw(img)
+            d.rectangle([10, 10, 54, 54], fill=(0, 200, 100), outline=(0, 255, 128), width=2)
+            menu = pystray.Menu(
+                pystray.MenuItem("Dashboard", lambda i, it: webbrowser.open("http://localhost:8080/dashboard"), default=True),
+                pystray.MenuItem("Logs", lambda i, it: os.startfile(str(PROJECT_ROOT / "logs" / "app.log"))),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Restart", lambda i, it: (i.stop(), os.execv(HERMES_PYTHON, [HERMES_PYTHON, str(PROJECT_ROOT / "tray.py")]))),
+                pystray.MenuItem("Stop", lambda i, it: (i.stop(), os._exit(0))),
+            )
+            icon = pystray.Icon("CacheForge", img, "CacheForge — Proxy :8080 | MCP :8081", menu)
+            log("tray icon actif")
+            icon.run()
+        except Exception:
+            log(f"TRAY CRASH\n{traceback.format_exc()}")
+
+    threading.Thread(target=run_tray, daemon=True).start()
+    
+    # Main thread: keep alive, monitor ports
     try:
-        import pystray
-        from PIL import Image, ImageDraw
-        img = Image.new("RGB", (64, 64), (30, 30, 30))
-        d = ImageDraw.Draw(img)
-        d.rectangle([10, 10, 54, 54], fill=(0, 200, 100), outline=(0, 255, 128), width=2)
-        menu = pystray.Menu(
-            pystray.MenuItem("Dashboard", lambda i, it: webbrowser.open("http://localhost:8080/dashboard"), default=True),
-            pystray.MenuItem("Logs", lambda i, it: os.startfile(str(PROJECT_ROOT / "logs" / "app.log"))),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Restart", lambda i, it: (i.stop(), os.execv(sys.executable, [sys.executable, str(PROJECT_ROOT / "tray.py")]))),
-            pystray.MenuItem("Stop", lambda i, it: (i.stop(), os._exit(0))),
-        )
-        icon = pystray.Icon("CacheForge", img, "CacheForge — Proxy :8080 | MCP :8081", menu)
-        log("tray icon actif")
-        icon.run()
-    except Exception:
-        log(f"TRAY CRASH\n{traceback.format_exc()}")
         while True:
-            time.sleep(60)
+            time.sleep(10)
+            if not port_up(8080):
+                log("ALERT: Proxy 8080 down!")
+            if not port_up(8081):
+                log("ALERT: MCP 8081 down!")
+    except KeyboardInterrupt:
+        log("Shutdown requested")
+        os._exit(0)
 
 if __name__ == "__main__":
     main()

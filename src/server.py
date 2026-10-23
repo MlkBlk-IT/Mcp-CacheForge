@@ -11,6 +11,7 @@ import re
 import json
 import sqlite3
 import logging
+import socket
 import sys
 import time
 from pathlib import Path
@@ -566,6 +567,29 @@ async def proxy_chat(request: Request):
     
     logger.info(f"CACHE MISS: {p_hash[:8]}... → Forwarding to {target_url}")
     
+    # Déterminer provider name et localisation (local/cloud)
+    def _parse_provider_info(url: str) -> tuple[str, str]:
+        """Retourne (provider_name, location) depuis l'URL cible."""
+        if 'localhost' in url or '127.0.0.1' in url:
+            if '20128' in url:
+                return 'omniroute', 'local'
+            elif '1234' in url:
+                return 'lmstudio', 'local'
+            else:
+                return 'local-other', 'local'
+        elif 'groq.com' in url:
+            return 'groq', 'cloud'
+        elif 'openrouter.ai' in url:
+            return 'openrouter', 'cloud'
+        elif 'cloudflare.com' in url:
+            return 'cloudflare', 'cloud'
+        elif 'mistral.ai' in url:
+            return 'mistral', 'cloud'
+        else:
+            return 'unknown-cloud', 'cloud'
+    
+    provider_name, location = _parse_provider_info(target_url)
+    
     headers = {'Content-Type': 'application/json'}
     if api_key:
         headers['Authorization'] = f'Bearer {api_key}'
@@ -620,14 +644,14 @@ async def proxy_chat(request: Request):
         if should_cache:
             try:
                 cache.set(
-                    prompt_hash=p_hash,
-                    normalized=normalized,
-                    original=user_prompt_text,
-                    response=full_response,
-                    is_stream=True,
-                    provider=target_url,
-                    model=model_real or body.get('model', 'unknown')
-                )
+                                    prompt_hash=p_hash,
+                                    normalized=normalized,
+                                    original=user_prompt_text,
+                                    response=full_response,
+                                    is_stream=True,
+                                    provider=provider_name,
+                                    model=model_real or body.get('model', 'unknown')
+                                )
             except Exception:
                 logger.exception("CACHE SAVE failed (stream)")
         else:
@@ -692,14 +716,14 @@ async def proxy_chat(request: Request):
 
             if should_cache:
                 cache.set(
-                    prompt_hash=p_hash,
-                    normalized=normalized,
-                    original=user_prompt_text,
-                    response=response_to_cache,
-                    is_stream=False,
-                    provider=target_url,
-                    model=resp_json.get('model') or body.get('model', 'unknown')
-                )
+                                    prompt_hash=p_hash,
+                                    normalized=normalized,
+                                    original=user_prompt_text,
+                                    response=response_to_cache,
+                                    is_stream=False,
+                                    provider=provider_name,
+                                    model=resp_json.get('model') or body.get('model', 'unknown')
+                                )
             else:
                 logger.info("CACHE SKIP: Not saving non-deterministic non-stream response")
             
@@ -712,6 +736,48 @@ async def health_check():
         'status': 'healthy',
         'cache_stats': cache.get_stats(),
         'target_provider': CONFIG['proxy']['target_provider']
+    }
+
+
+def _tcp_alive(host: str, port: int, timeout: float = 0.7) -> tuple:
+    """Liveness TCP brute : (alive, latency_ms). Evite toute dependance HTTP/CORS."""
+    t0 = time.perf_counter()
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True, round((time.perf_counter() - t0) * 1000, 1)
+    except OSError:
+        return False, None
+
+
+def _mcp_tool_names() -> list:
+    """Noms des outils MCP exposes (introspection, repli statique)."""
+    try:
+        return sorted(mcp._tool_manager._tools.keys())
+    except Exception:
+        return ["clear_cache", "get_cache_stats", "normalize_preview", "search_cached_prompts"]
+
+
+@app.get("/api/status")
+async def api_status():
+    """Statut live du proxy, du serveur MCP et de l'upstream (liveness TCP)."""
+    mcp_host = CONFIG['mcp'].get('host', '127.0.0.1')
+    mcp_port = int(CONFIG['mcp'].get('port', 8081))
+    mcp_alive, mcp_ms = _tcp_alive(mcp_host, mcp_port)
+
+    target = CONFIG['proxy']['target_provider']
+    up_host, up_port = '127.0.0.1', 80
+    m = re.search(r'://([^:/]+)(?::(\d+))?', target)
+    if m:
+        up_host = m.group(1)
+        up_port = int(m.group(2) or (443 if target.startswith('https') else 80))
+    up_alive, up_ms = _tcp_alive(up_host, up_port)
+
+    return {
+        'proxy': {'alive': True, 'host': CONFIG['proxy']['host'], 'port': CONFIG['proxy']['port']},
+        'mcp': {'alive': mcp_alive, 'latency_ms': mcp_ms, 'host': mcp_host, 'port': mcp_port,
+                'transports': CONFIG['mcp'].get('transport', []), 'tools': _mcp_tool_names()},
+        'upstream': {'alive': up_alive, 'latency_ms': up_ms, 'target_provider': target},
+        'server_time': datetime.now(timezone.utc).isoformat(),
     }
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -851,23 +917,53 @@ if __name__ == "__main__":
         mcp.run(transport='sse')
     
     elif args.mode == 'all':
-        logger.info(f"Starting CacheForge in full mode")
-        logger.info(f"  Proxy HTTP: http://localhost:{proxy_port}")
-        logger.info(f"  MCP SSE:    http://localhost:{mcp_port}/sse")
-        logger.info(f"  MCP stdio:  Disponible via Claude Desktop")
+            logger.info(f"Starting CacheForge in full mode")
+            logger.info(f"  Proxy HTTP: http://localhost:{proxy_port}")
+            logger.info(f"  MCP SSE:    http://localhost:{mcp_port}/sse")
+            logger.info(f"  MCP stdio:  Disponible via Claude Desktop")
         
-        import threading
-        import uvicorn
+            import threading
+            import uvicorn
+            import time
+            import sys
         
-        def run_proxy():
-            uvicorn.run(app, host=CONFIG['proxy']['host'], port=proxy_port, log_level='warning')
+            def run_proxy():
+                uvicorn.run(app, host=CONFIG['proxy']['host'], port=proxy_port, log_level='warning')
         
-        proxy_thread = threading.Thread(target=run_proxy, daemon=True)
-        proxy_thread.start()
+            def run_mcp_sse():
+                import os
+                os.environ["MCP_SSE_PORT"] = str(mcp_port)
+                mcp.run(transport='sse')
         
-        # Lancement du MCP SSE (compatible v1.x)
-        import os
-        os.environ["MCP_SSE_PORT"] = str(mcp_port)
-        mcp.run(transport='sse')
+            def run_with_restart(target, name):
+                """Wrapper qui redémarre le thread si il crash."""
+                while True:
+                    try:
+                        logger.info(f"Starting {name}...")
+                        target()
+                    except Exception as e:
+                        logger.error(f"{name} crashed: {e}, restarting in 5s...")
+                        time.sleep(5)
+                    else:
+                        logger.info(f"{name} stopped cleanly")
+                        break
+        
+            proxy_thread = threading.Thread(target=run_with_restart, args=(run_proxy, "Proxy HTTP"), daemon=True)
+            mcp_thread = threading.Thread(target=run_with_restart, args=(run_mcp_sse, "MCP SSE"), daemon=True)
+        
+            proxy_thread.start()
+            mcp_thread.start()
+        
+            # Keep main thread alive, monitor threads
+            try:
+                while True:
+                    time.sleep(10)
+                    if not proxy_thread.is_alive():
+                        logger.warning("Proxy thread died, will restart via wrapper")
+                    if not mcp_thread.is_alive():
+                        logger.warning("MCP SSE thread died, will restart via wrapper")
+            except KeyboardInterrupt:
+                logger.info("Shutdown requested")
+                sys.exit(0)
 
 
