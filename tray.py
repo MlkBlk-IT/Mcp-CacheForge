@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""CacheForge Tray Launcher v2 — background, zéro console, logs fichier"""
+"""IcyCache Tray Launcher v2 — background, zéro console, logs fichier"""
 import sys, os, threading, time, webbrowser, traceback, subprocess
 from pathlib import Path
 
-PROJECT_ROOT = Path(r"D:\CacheForge")
+PROJECT_ROOT = Path(r"D:\IcyCache")
 LOG = PROJECT_ROOT / "logs" / "tray.log"
 LOG.parent.mkdir(parents=True, exist_ok=True)
 
@@ -71,7 +71,7 @@ def main():
                 pystray.MenuItem("Restart", lambda i, it: (i.stop(), os.execv(HERMES_PYTHON, [HERMES_PYTHON, str(PROJECT_ROOT / "tray.py")]))),
                 pystray.MenuItem("Stop", lambda i, it: (i.stop(), os._exit(0))),
             )
-            icon = pystray.Icon("CacheForge", img, "CacheForge — Proxy :8080 | MCP :8081", menu)
+            icon = pystray.Icon("IcyCache", img, "IcyCache — Proxy :8080 | MCP :8081", menu)
             log("tray icon actif")
             icon.run()
         except Exception:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CacheForge - MCP Bi-Directionnel avec Cache Sémantique/Exact
+IcyCache - MCP Bi-Directionnel avec Cache Sémantique/Exact
 Proxy HTTP + MCP Server (dual transport: stdio + SSE)
 """
 
@@ -27,16 +27,16 @@ from mcp.server.fastmcp import FastMCP
 from tqdm import tqdm
 
 # === CONFIGURATION ===
-PROJECT_ROOT = Path(r"D:\CacheForge")
-CONFIG_FILE = PROJECT_ROOT / "config" / "cacheforge.json"
-DB_FILE = Path(os.environ.get("CACHEFORGE_DB") or (PROJECT_ROOT / "db" / "cache.db"))
-LOG_FILE = Path(os.environ.get("CACHEFORGE_LOG") or (PROJECT_ROOT / "logs" / "app.log"))
+PROJECT_ROOT = Path(r"D:\IcyCache")
+CONFIG_FILE = PROJECT_ROOT / "config" / "icycache.json"
+DB_FILE = Path(os.environ.get("ICYCACHE_DB") or (PROJECT_ROOT / "db" / "cache.db"))
+LOG_FILE = Path(os.environ.get("ICYCACHE_LOG") or (PROJECT_ROOT / "logs" / "app.log"))
 
 # Chargement de la configuration
 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
     CONFIG = json.load(f)
-if os.environ.get("CACHEFORGE_TARGET"):  # tests isoles: upstream factice
-    CONFIG['proxy']['target_provider'] = os.environ["CACHEFORGE_TARGET"]
+if os.environ.get("ICYCACHE_TARGET"):  # tests isoles: upstream factice
+    CONFIG['proxy']['target_provider'] = os.environ["ICYCACHE_TARGET"]
 
 # Configuration du logging
 logging.basicConfig(
@@ -47,7 +47,7 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-logger = logging.getLogger("CacheForge")
+logger = logging.getLogger("IcyCache")
 
 # === MOTEUR DE NORMALISATION PAR PIPELINE (RIGOUREUX & RAPIDE) ===
 class NormalizationPipeline:
@@ -175,7 +175,7 @@ class CacheManager:
         conn.close()
         
         if 'cache' not in tables:
-            raise RuntimeError("Base de données non initialisée. Exécuter 2-FIX_CacheForge.ps1")
+            raise RuntimeError("Base de données non initialisée. Exécuter 2-FIX_IcyCache.ps1")
     
     def get(self, prompt_hash: str) -> Optional[Dict[str, Any]]:
         """Récupère une entrée du cache"""
@@ -323,7 +323,7 @@ def original_usage(h):
 # Bind explicite depuis la config: mcp.run(transport='sse') seul ignorerait
 # host/port (defaut SDK 127.0.0.1:8000) et exposerait le port sur le LAN.
 mcp = FastMCP(
-    "CacheForge",
+    "IcyCache",
     host=CONFIG['mcp'].get('host', '127.0.0.1'),
     port=CONFIG['mcp'].get('port', 8081),
 )
@@ -382,7 +382,7 @@ def search_cached_prompts(query: str, limit: int = 10) -> list:
     return results
 
 # === PROXY HTTP ===
-app = FastAPI(title="CacheForge Proxy", version="1.0.0")
+app = FastAPI(title="IcyCache Proxy", version="1.0.0")
 
 # Champs sans effet sur la sortie. Tout le reste entre dans la clé de cache.
 CACHE_KEY_IGNORED = {"stream", "stream_options", "user"}
@@ -875,7 +875,7 @@ async def api_metrics_export(since: str = "", limit: int = 10000):
     so = sum((r["completion_tokens"] or 0) for r in rows if r["kind"] != "HIT")
     vp = sum(r["saved_prompt"] or 0 for r in rows)
     vo = sum(r["saved_completion"] or 0 for r in rows)
-    return {"schema": "cacheforge.metrics.export/v1",
+    return {"schema": "icycache.metrics.export/v1",
             "generated_at_utc": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
             "since": since or None, "count": len(rows),
             "summary": {"tokens_in_spent": sp, "tokens_out_spent": so, "tokens_in_saved": vp,
@@ -885,9 +885,9 @@ async def api_metrics_export(since: str = "", limit: int = 10000):
 
 @app.post("/api/cache-clear")
 async def api_clear_cache(request: Request):
-    """Vide le cache via API (exige l'en-tete X-CacheForge-Confirm: FORCE_DELETE)"""
-    if request.headers.get('x-cacheforge-confirm') != 'FORCE_DELETE':
-        raise HTTPException(status_code=403, detail="Missing header X-CacheForge-Confirm: FORCE_DELETE")
+    """Vide le cache via API (exige l'en-tete X-IcyCache-Confirm: FORCE_DELETE)"""
+    if request.headers.get('x-icycache-confirm') != 'FORCE_DELETE':
+        raise HTTPException(status_code=403, detail="Missing header X-IcyCache-Confirm: FORCE_DELETE")
     cache.clear()
     return {"message": "Cache vidé avec succès", "success": True}
 
@@ -895,7 +895,7 @@ async def api_clear_cache(request: Request):
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="CacheForge Server")
+    parser = argparse.ArgumentParser(description="IcyCache Server")
     parser.add_argument('--mode', choices=['proxy', 'mcp-stdio', 'mcp-sse', 'all'], 
                        default='all', help="Mode de démarrage")
     
@@ -917,7 +917,7 @@ if __name__ == "__main__":
         mcp.run(transport='sse')
     
     elif args.mode == 'all':
-            logger.info(f"Starting CacheForge in full mode")
+            logger.info(f"Starting IcyCache in full mode")
             logger.info(f"  Proxy HTTP: http://localhost:{proxy_port}")
             logger.info(f"  MCP SSE:    http://localhost:{mcp_port}/sse")
             logger.info(f"  MCP stdio:  Disponible via Claude Desktop")

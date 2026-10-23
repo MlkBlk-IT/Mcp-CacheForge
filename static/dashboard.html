@@ -11,16 +11,17 @@
   --bg2:#0a1020;
   --panel:rgba(12,20,38,.72);
   --panel-soft:rgba(16,26,46,.5);
-  --brd:rgba(34,230,255,.18);
-  --brd-hot:rgba(34,230,255,.45);
-  --cyan:#22e6ff;
-  --pink:#ff3d63;
-  --lime:#39ffa8;
-  --amber:#ffe055;
-  --violet:#c56bff;
-  --ink:#f2fbff;
-  --muted:#a4cdea;
-  --dim:#7796b4;
+  --brd:rgba(0,255,255,.18);
+  --brd-hot:rgba(255,100,0,.45);
+  --ice:#00ffff;
+  --ice-glow:#00ffffcc;
+  --fire:#ff6400;
+  --fire-glow:#ff6400cc;
+  --ember:#ffaa00;
+  --ash:#444855;
+  --ink:#f0ffff;
+  --muted:#88cccc;
+  --dim:#557777;
   --mono:'Cascadia Mono','Consolas','SF Mono',ui-monospace,monospace;
   --sans:'Segoe UI Variable Display','Segoe UI',system-ui,-apple-system,sans-serif;
 }
@@ -396,14 +397,36 @@ body::before{
 .globe-legend i{width:8px;height:8px;border-radius:2px;display:inline-block}
 
 /* ============ ring gauge ============ */
-.ring-wrap{position:relative;display:flex;align-items:center;justify-content:center;gap:16px;padding:4px 0 2px}
-.ring-canvas{position:relative;flex:0 0 auto;display:grid;place-items:center}
-#ring3d{width:100%;max-width:300px;height:230px;display:block}
+.ring-wrap{position:relative;display:flex;flex-direction:column;align-items:center;gap:11px;padding:2px 0}
+.ring-canvas{position:relative;width:100%;display:grid;place-items:center}
+#ring3d{width:100%;max-width:432px;height:300px;display:block}
 .ring-center{
-  position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;text-align:center;
+  position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;text-align:center;z-index:2;
 }
-.ring-center .big{font-size:34px;font-weight:800;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
+/* the readout floats on the crossing of the ∞ — a holo panel in the hub */
+.ring-center::before{
+  content:'';position:absolute;width:186px;height:186px;border-radius:50%;
+  background:radial-gradient(circle,rgba(2,7,16,.92) 0%,rgba(2,7,16,.66) 40%,rgba(2,7,16,0) 72%);
+}
+.ring-center > div{position:relative;z-index:1}
+.ring-center .big{font-size:34px;font-weight:800;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums;text-shadow:0 0 22px rgba(34,230,255,.55)}
 .ring-center .lbl{font-size:9.5px;letter-spacing:2.2px;color:var(--dim);text-transform:uppercase;margin-top:7px;font-weight:800}
+/* loop HUD — the instrument panel of the agent loop */
+.loop-hud{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+/* the five stations of the agent pipeline */
+.loop-stages{display:flex;flex-wrap:wrap;gap:5px;justify-content:center}
+.loop-stages span{
+  font-family:var(--mono);font-size:8.5px;letter-spacing:1.1px;font-weight:800;
+  padding:3px 8px;border-radius:20px;border:1px solid rgba(238,250,255,.08);
+  color:var(--dim);background:rgba(4,9,18,.55);transition:.25s cubic-bezier(.2,.8,.2,1);
+}
+.loop-stages span.on{
+  color:#1a0308;background:var(--pink);border-color:transparent;
+  box-shadow:0 0 16px rgba(255,61,99,.6),0 0 30px rgba(255,61,99,.3);
+}
+/* counter + legend share the last row */
+.ring-bottom{width:100%;display:flex;gap:15px;align-items:stretch}
+.ring-bottom .leg{flex:1;min-width:0;justify-content:center}
 /* live token counter, right next to the gauge */
 .token-counter{
   flex:0 0 150px;display:flex;flex-direction:column;gap:6px;padding:11px 13px;border-radius:13px;
@@ -808,7 +831,7 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
         </div>
 
         <div class="glass">
-          <h3><span class="ln"></span>Request Split<span class="badge" id="ring-badge">3D GAUGE</span></h3>
+          <h3><span class="ln"></span>Agent Loop<span class="badge" id="ring-badge">∞ LEMNISCATE</span></h3>
           <div class="ring-wrap">
             <div class="ring-canvas">
               <canvas id="ring3d" width="720" height="520"></canvas>
@@ -819,20 +842,31 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
                 </div>
               </div>
             </div>
-            <div class="token-counter">
-              <div class="tc-k">Tokens saved <i>live</i></div>
-              <div class="tc-v c-lime" id="tc-val">0</div>
-              <div class="tc-r" id="tc-rate">— /s</div>
-              <div class="tc-bar"><i id="tc-bar"></i></div>
-              <div class="tc-sub" id="tc-sub">waiting for traffic…</div>
+            <div class="loop-hud" id="loop-hud">
+              <button class="hud-btn on" data-lp="shape">∞ LOOP</button>
+              <button class="hud-btn" data-lp="flight">FLIGHT</button>
+              <button class="hud-btn on" data-lp="bolt">⚡ STORM</button>
+              <button class="hud-btn on" data-lp="spin">SPIN</button>
+              <button class="hud-btn" data-lp="thin">THIN</button>
+              <button class="hud-btn" data-lp="thick">THICK</button>
+            </div>
+            <div class="loop-stages" id="loop-stages"></div>
+            <div class="ring-bottom">
+              <div class="token-counter">
+                <div class="tc-k">Tokens saved <i>live</i></div>
+                <div class="tc-v c-lime" id="tc-val">0</div>
+                <div class="tc-r" id="tc-rate">— /s</div>
+                <div class="tc-bar"><i id="tc-bar"></i></div>
+                <div class="tc-sub" id="tc-sub">waiting for traffic…</div>
+              </div>
+              <div class="leg">
+                <div class="leg-row"><span class="dot" style="background:var(--lime);color:var(--lime)"></span><span class="nm">Hits</span><b class="c-lime" id="lg-hits">—</b></div>
+                <div class="leg-row"><span class="dot" style="background:var(--cyan);color:var(--cyan)"></span><span class="nm">Misses</span><b class="c-cyan" id="lg-miss">—</b></div>
+                <div class="leg-row"><span class="dot" style="background:var(--amber);color:var(--amber)"></span><span class="nm">Bypass</span><b class="c-amber" id="lg-bypass">—</b></div>
+                <div class="sub" id="lg-note"></div>
+              </div>
             </div>
           </div>
-          <div class="leg" style="margin-top:10px">
-            <div class="leg-row"><span class="dot" style="background:var(--lime);color:var(--lime)"></span><span class="nm">Hits</span><b class="c-lime" id="lg-hits">—</b></div>
-            <div class="leg-row"><span class="dot" style="background:var(--cyan);color:var(--cyan)"></span><span class="nm">Misses</span><b class="c-cyan" id="lg-miss">—</b></div>
-            <div class="leg-row"><span class="dot" style="background:var(--amber);color:var(--amber)"></span><span class="nm">Bypass</span><b class="c-amber" id="lg-bypass">—</b></div>
-          </div>
-          <div class="sub" id="lg-note"></div>
         </div>
       </div>
 
@@ -848,9 +882,9 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
           <div class="bars-stage"><canvas id="bars3d"></canvas><div class="chart-empty" id="chart-empty">No traffic in this range</div></div>
           <div class="chart-legend">
             <span><i style="background:var(--lime);color:var(--lime)"></i>Hits</span>
-            <span><i style="background:var(--cyan);color:var(--cyan)"></i>Misses</span>
-            <span><i style="background:var(--amber);color:var(--amber)"></i>Bypass</span>
-            <span><i style="background:var(--pink);color:var(--pink)"></i>Tokens saved</span>
+            <span><i style="background:var(--pink);color:var(--pink)"></i>Misses</span>
+            <span><i style="background:var(--violet);color:var(--violet)"></i>Bypass</span>
+            <span><i style="background:var(--cyan);color:var(--cyan)"></i>Tokens saved</span>
           </div>
         </div>
 
@@ -891,9 +925,9 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
         <div class="bars-stage"><canvas id="bars-act"></canvas><div class="chart-empty" id="chart-empty-act">No traffic in this range</div></div>
         <div class="chart-legend">
           <span><i style="background:var(--lime);color:var(--lime)"></i>Hits</span>
-          <span><i style="background:var(--cyan);color:var(--cyan)"></i>Misses</span>
-          <span><i style="background:var(--amber);color:var(--amber)"></i>Bypass</span>
-          <span><i style="background:var(--pink);color:var(--pink)"></i>Tokens saved (line)</span>
+          <span><i style="background:var(--pink);color:var(--pink)"></i>Misses</span>
+          <span><i style="background:var(--violet);color:var(--violet)"></i>Bypass</span>
+          <span><i style="background:var(--cyan);color:var(--cyan)"></i>Tokens saved (line)</span>
         </div>
       </div>
 
@@ -1255,8 +1289,8 @@ class Globe {
     this.showLabels = true; this.showEdges = true;
 
     this.shells = [
-      this.buildShell(92, 1.00, 5, [34, 230, 255], [57, 255, 168]),
-      this.buildShell(46, 0.55, 5, [197, 107, 255], [255, 224, 85])
+      this.buildShell(92, 1.00, 4, [34, 230, 255], [57, 255, 168]),
+      this.buildShell(46, 0.55, 4, [197, 107, 255], [255, 224, 85])
     ];
     this.shells[0].spinMul = 1;
     this.shells[1].spinMul = 1.9;
@@ -1475,7 +1509,7 @@ class Globe {
       const pts = s.full ? this.edgePath(s.A, s.B, mul, s.seed) : [s.p1, s.p2];
       buckets[s.z > 0.55 ? 0 : (s.z > 0.2 ? 1 : 2)].push(pts);
     }
-    const alph = [0.20, 0.13, 0.08];
+    const alph = [0.15, 0.10, 0.06];
     for (let bi = 0; bi < 3; bi++){
       if (!buckets[bi].length) continue;
       ctx.strokeStyle = 'rgba(34,230,255,' + alph[bi].toFixed(2) + ')';
@@ -1508,12 +1542,20 @@ class Globe {
       const s = this.proj(P);
       const z = P[2];
       const held = this.dragNode === n, hot = this.hoverNode === n;
-      const r = (sh.radius < 0.8 ? 1.35 : 2.05) * n.size + z * 1.35 + n.fire * 5.2 + (held ? 2.6 : 0);
+      const r = (sh.radius < 0.8 ? 1.9 : 2.85) * n.size + z * 1.35 + n.fire * 5.2 + (held ? 2.6 : 0);
       const cb = n.col;
       ctx.fillStyle = rgb(cb, 0.05 + n.fire * 0.38 + (held || hot ? 0.14 : 0));
-      ctx.beginPath(); ctx.arc(s[0], s[1], r * 3.6, 0, 7); ctx.fill();
-      ctx.fillStyle = rgb(cb, 0.14 + n.fire * 0.44);
-      ctx.beginPath(); ctx.arc(s[0], s[1], r * 1.85, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(s[0], s[1], r * 3.8, 0, 7); ctx.fill();
+      ctx.fillStyle = rgb(cb, 0.16 + n.fire * 0.44);
+      ctx.beginPath(); ctx.arc(s[0], s[1], r * 1.9, 0, 7); ctx.fill();
+      /* atomic orbital: a thin ring around the nucleus — the electron shell */
+      if (sh.radius >= 0.8){
+        ctx.strokeStyle = rgb(cb, .16 + n.fire * .3 + (held || hot ? .22 : 0));
+        ctx.lineWidth = .9;
+        ctx.beginPath();
+        ctx.ellipse(s[0], s[1], r * 2.55, r * 0.82, -0.55, 0, 7);
+        ctx.stroke();
+      }
       /* the node flashes when the cache serves it */
       if (n.fire > 0.04){
         const t = 1 - n.fire;
@@ -1528,6 +1570,11 @@ class Globe {
         ? 'rgba(255,255,255,' + (0.6 + n.fire * 0.4).toFixed(3) + ')'
         : rgb(cb, 0.32 + Math.max(0, z) * 0.64);
       ctx.beginPath(); ctx.arc(s[0], s[1], r, 0, 7); ctx.fill();
+      /* specular pip: the nucleus reads as a lit sphere, not a flat dot */
+      if (n.fire < 0.04){
+        ctx.fillStyle = 'rgba(255,255,255,.5)';
+        ctx.beginPath(); ctx.arc(s[0] - r*0.3, s[1] - r*0.34, r*0.3, 0, 7); ctx.fill();
+      }
       if (held || hot){
         ctx.strokeStyle = 'rgba(255,255,255,.85)';
         ctx.lineWidth = 1.4;
@@ -1920,7 +1967,7 @@ class Bars3D {
   }
   step(dt){
     this.drift += dt;
-    if (this.autoSpin !== false) this.yaw = 0.30 + Math.sin(this.drift * 0.22) * 0.30;
+    if (this.autoSpin !== false) this.yaw = 0.26 + Math.sin(this.drift * 0.22) * 0.17;
     applyOrbit(this);
     // animate toward target
     const maxV = Math.max(1, ...this.target.map(p => (p.hits || 0) + (p.misses || 0) + (p.bypass || 0)));
@@ -1955,8 +2002,8 @@ class Bars3D {
 
     const n = this.bars.length;
     const spacing = 2 / Math.max(1, n);      // world units: chart spans x = -1..1
-    const barW = Math.min(spacing * 0.68, this.opts.maxBarW);   // world units
-    const depth = barW * 2.4;              // world units (column thickness — real volume)
+    const barW = Math.min(spacing * 0.76, this.opts.maxBarW);   // world units
+    const depth = barW * 1.05;             // circular cross-section — a true column
     const SX = (this.W - this.pad.l - this.pad.r) * 0.40;
     const maxH = 1;                         // world units: y = 1 is full height
 
@@ -2020,9 +2067,18 @@ class Bars3D {
 
       for (const sg of bx.segs){
         const hw = barW / 2, hd = depth / 2;
-        const prof = this.barProfile(hw, hd, 10);
+        const prof = this.barProfile(hw, hd, 14);
         const n2 = prof.length;
-        /* rounded body, lit from the front-right */
+        /* a true cylinder: the ring is projected once, and every facet is lit
+           by its own screen-space normal — that is what makes the column
+           read as a round, glossy volume instead of a flat slab */
+        const mid = (sg.y0 + sg.y1) / 2;
+        const ring = prof.map(p => this.project(bx.x0 + p[0], mid, p[1]));
+        let rcx = 0, rcy = 0;
+        for (const v of ring){ rcx += v[0]; rcy += v[1]; }
+        rcx /= n2; rcy /= n2;
+        const base = hexRgb(sg.c);
+        const grad = 0.38 + 0.62 * Math.min(1, sg.y1 / maxH);
         for (let i = 0; i < n2; i++){
           const p0 = prof[i], p1 = prof[(i + 1) % n2];
           const q = [
@@ -2031,23 +2087,40 @@ class Bars3D {
             this.project(bx.x0 + p1[0], sg.y1, p1[1]),
             this.project(bx.x0 + p0[0], sg.y1, p0[1])
           ];
-          const ang = (i / n2) * Math.PI * 2;
-          const light = 0.5 + 0.5 * (Math.cos(ang) * 0.35 + Math.sin(ang) * 0.9);
-          const shade = (0.10 + light * 0.44) * (0.7 + 0.5 * Math.min(1, sg.y1 / maxH));
+          const v = ring[i];
+          let nx = v[0] - rcx, ny = v[1] - rcy;
+          const nl = Math.hypot(nx, ny) || 1;
+          nx /= nl; ny /= nl;
+          const ndl = Math.max(0, nx * -0.52 + ny * -0.78);
+          const spec = Math.pow(ndl, 26);
+          const rim = Math.pow(1 - ndl, 3.2);
+          const shade = (0.13 + ndl * 0.98) * grad;
+          const cr = Math.min(255, base[0]*shade + spec*235 + rim*30);
+          const cg = Math.min(255, base[1]*shade + spec*235 + rim*70);
+          const cb = Math.min(255, base[2]*shade + spec*235 + rim*95);
           ctx.beginPath();
           ctx.moveTo(q[0][0], q[0][1]);
           for (let k = 1; k < 4; k++) ctx.lineTo(q[k][0], q[k][1]);
           ctx.closePath();
-          ctx.fillStyle = hexA(sg.c, Math.min(1, shade));
+          ctx.fillStyle = 'rgb(' + (cr|0) + ',' + (cg|0) + ',' + (cb|0) + ')';
           ctx.fill();
         }
-        /* glossy rounded cap */
-        const cap = prof.map(p => this.project(bx.x0 + p[0], sg.y1, p[1]));
-        this.face(ctx, cap, sg.c, .58, false);
+        /* glossy rounded cap: a lit dome, not a flat disc */
+        const capPts = prof.map(p => this.project(bx.x0 + p[0], sg.y1, p[1]));
         const cxy = this.project(bx.x0, sg.y1, 0);
-        ctx.fillStyle = 'rgba(255,255,255,.28)';
+        const cg2 = ctx.createRadialGradient(cxy[0] - barW*SX*0.18, cxy[1] - barW*SX*0.10, 0, cxy[0], cxy[1], barW*SX*0.85 + 1);
+        cg2.addColorStop(0, hexA(sg.c, .95));
+        cg2.addColorStop(.55, hexA(sg.c, .72));
+        cg2.addColorStop(1, hexA(sg.c, .40));
         ctx.beginPath();
-        ctx.ellipse(cxy[0] - barW * SX * 0.16, cxy[1], barW * SX * 0.20, barW * SX * 0.085, 0, 0, 7);
+        ctx.moveTo(capPts[0][0], capPts[0][1]);
+        for (let k = 1; k < capPts.length; k++) ctx.lineTo(capPts[k][0], capPts[k][1]);
+        ctx.closePath();
+        ctx.fillStyle = cg2; ctx.fill();
+        ctx.strokeStyle = hexA('#ffffff', .40); ctx.lineWidth = 1 * this.dpr; ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,.55)';
+        ctx.beginPath();
+        ctx.ellipse(cxy[0] - barW * SX * 0.20, cxy[1] - barW * SX * 0.05, barW * SX * 0.22, barW * SX * 0.075, -0.4, 0, 7);
         ctx.fill();
       }
 
@@ -2142,6 +2215,11 @@ class Bars3D {
     }
   }
 }
+function hexRgb(hex){
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
 function hexA(hex, a){
   const h = hex.replace('#', '');
   const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
@@ -2149,24 +2227,199 @@ function hexA(hex, a){
 }
 
 /* ==================================================================
-   3D TORUS GAUGE — hit rate as a lit 3D ring
+   LOOP3D — THE AGENT LOOP
+   ------------------------------------------------------------------
+   The old donut is gone. What stands here now is a lemniscate of
+   Bernoulli — a real ∞ — swept as a solid, lit 3D ribbon.
+
+     shape  : 'loop'  → ∞ lemniscate (default)   'donut' → classic torus
+     flight : the camera rides the ribbon through space, banked, with
+              the conduit rushing past on both sides
+     bolts  : 0 off · 1 normal · 2 storm — manga-grade discharges that
+              race *inside* the tube, forked, white-cored, with a
+              screen flash and a camera kick
+     gauge  : the hit-rate charges the ribbon; the head rides the curve
+              and lights up the five stages of the agent pipeline
    ================================================================== */
-const RING_LIME = [57, 255, 168], RING_CYAN = [34, 230, 255], RING_VIOLET = [197, 107, 255];
+const LOOP_LIME = [57, 255, 168], LOOP_CYAN = [34, 230, 255],
+      LOOP_VIOLET = [197, 107, 255], LOOP_HOT = [255, 92, 150];
+const LOOP_TAU = Math.PI * 2;
+const LOOP_STAGES = ['PROMPT', 'NORMALIZE', 'KEY', 'CACHE', 'SERVE'];
 const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
-class Ring3D {
+class Loop3D {
   constructor(canvas){
     this.cv = canvas; this.ctx = canvas.getContext('2d');
     this.W = canvas.width; this.H = canvas.height;
-    this.pct = 0; this.target = 0; this.yaw = 0; this.tilt = 0.95; this.drift = 0;
+    this.pct = 0; this.target = 0;
+    this.yaw = 0; this.tilt = 0.30; this.drift = 0; this.dt = 0.016;
     this.zoom = 1; this.autoSpin = true; this.manual = false; this.drag = null;
-    this.arcs = []; this.jumps = []; this.bolts = []; this.arcCd = 0; this.flash = 0;
-    this.motes = [];
-    for (let i = 0; i < 22; i++) this.motes.push({ a:Math.random()*Math.PI*2, sp:0.18 + Math.random()*0.5, r:0.40 + Math.random()*0.2, s:0.7 + Math.random()*1.5 });
+    this.mode = 'loop'; this.flight = false; this.boltLevel = 2; this.thick = 1;
+    this.flash = 0; this.shake = 0; this.flightT = 0;
+    this.arcCd = 0.7; this.boltCd = 0;
+    this.activeStage = 0;
+    this.bolts = []; this.arcs = []; this.streaks = []; this.motes = [];
+    for (let i = 0; i < 24; i++)
+      this.motes.push({ u:Math.random(), a:Math.random()*LOOP_TAU, r:0.32+Math.random()*0.5, s:0.5+Math.random()*1.4, sp:(Math.random()<0.5?-1:1)*(0.05+Math.random()*0.12) });
+    for (let i = 0; i < 54; i++)
+      this.streaks.push({ a:Math.random()*LOOP_TAU, r:Math.random()*1.2, sp:0.55+Math.random()*1.5, l:0.05+Math.random()*0.14 });
+    this.build();
     this.resize();
     this.bindControls();
   }
-  /* the gauge is a real object: drag it, spin it, zoom it */
+
+  /* ==================== geometry ==================== */
+  curve(t){
+    if (this.mode === 'donut') return [Math.cos(t), 0, Math.sin(t)];
+    const c = Math.cos(t), s = Math.sin(t);
+    return [c * 1.02, s * c * 1.62, 0];
+  }
+  /* the ribbon: a tube swept along the curve, with a stable frame per station */
+  build(){
+    const NU = this.NU = 96, NV = this.NV = 12;
+    const ref = this.mode === 'donut' ? [0, 1, 0] : [0, 0, 1];
+    const C = [], T = [];
+    for (let i = 0; i < NU; i++) C.push(this.curve(i / NU * LOOP_TAU));
+    for (let i = 0; i < NU; i++){
+      const a = C[(i - 1 + NU) % NU], b = C[(i + 1) % NU];
+      const dx = b[0]-a[0], dy = b[1]-a[1], dz = b[2]-a[2];
+      const l = Math.hypot(dx, dy, dz) || 1;
+      T.push([dx/l, dy/l, dz/l]);
+    }
+    const r = 0.152 * this.thick;
+    this.verts = []; this.norms = []; this.frameN = []; this.frameB = [];
+    for (let i = 0; i < NU; i++){
+      const t = T[i];
+      let nx = t[1]*ref[2] - t[2]*ref[1];
+      let ny = t[2]*ref[0] - t[0]*ref[2];
+      let nz = t[0]*ref[1] - t[1]*ref[0];
+      const ln = Math.hypot(nx, ny, nz) || 1;
+      nx/=ln; ny/=ln; nz/=ln;
+      const bx = t[1]*nz - t[2]*ny, by = t[2]*nx - t[0]*nz, bz = t[0]*ny - t[1]*nx;
+      const rv = [], rn = [];
+      for (let j = 0; j < NV; j++){
+        const a = j / NV * LOOP_TAU, ca = Math.cos(a), sa = Math.sin(a);
+        const vx = nx*ca + bx*sa, vy = ny*ca + by*sa, vz = nz*ca + bz*sa;
+        rv.push([C[i][0]+vx*r, C[i][1]+vy*r, C[i][2]+vz*r]);
+        rn.push([vx, vy, vz]);
+      }
+      this.verts.push(rv); this.norms.push(rn);
+      this.frameN.push([nx, ny, nz]); this.frameB.push([bx, by, bz]);
+    }
+    this.center = C;
+  }
+  setMode(m){ if (m === this.mode) return; this.mode = m; this.build(); this.updateFocal(); }
+  setThick(v){ this.thick = v; this.build(); this.updateFocal(); }
+  setFlight(on){
+    this.flight = on;
+    if (!on){ this.yaw = 0; this.tilt = 0.22; this.autoSpin = true; }
+  }
+  setBolts(l){ this.boltLevel = l; if (!l){ this.bolts.length = 0; this.arcs.length = 0; } }
+
+  /* ==================== camera ==================== */
+  rotM(){
+    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+    const cx = Math.cos(this.tilt), sx = Math.sin(this.tilt);
+    return [cy, 0, sy, sy*sx, cx, -cy*sx, -sy*cx, sx, cy*cx];
+  }
+  applyRot(m, x, y, z){
+    return [m[0]*x + m[1]*y + m[2]*z, m[3]*x + m[4]*y + m[5]*z, m[6]*x + m[7]*y + m[8]*z];
+  }
+  sampleLocal(u){
+    const NU = this.NU;
+    const fi = (((u % 1) + 1) % 1) * NU;
+    const i0 = Math.floor(fi) % NU, i1 = (i0 + 1) % NU, t = fi - Math.floor(fi);
+    return {
+      p: lerp3(this.center[i0], this.center[i1], t),
+      b: lerp3(this.frameB[i0], this.frameB[i1], t),
+      n: lerp3(this.frameN[i0], this.frameN[i1], t)
+    };
+  }
+  sampleWorld(u){
+    const s = this.sampleLocal(u), m = this._m;
+    return {
+      p: this.applyRot(m, s.p[0], s.p[1], s.p[2]),
+      b: this.applyRot(m, s.b[0], s.b[1], s.b[2])
+    };
+  }
+  camera(){
+    if (!this.flight) return { pos:[0, 0, 3.42 * this.zoom], look:[0, 0, 0], roll:0 };
+    /* riding the ribbon — the camera flies just outside the conduit and
+       looks ahead down the track, so the ∞ bends away into the void */
+    const a = this.sampleWorld(this.flightT);
+    const c = this.sampleWorld(this.flightT + 0.085);
+    const off = (0.78 + 1.65 * (0.5 + 0.5 * Math.cos(this.flightT * LOOP_TAU * 2))) * this.zoom;
+    return {
+      pos:[a.p[0] + a.b[0]*off, a.p[1] + a.b[1]*off, a.p[2] + a.b[2]*off],
+      look:c.p,
+      roll:0.34 * Math.sin(this.flightT * LOOP_TAU * 2 + 0.35)
+    };
+  }
+  basis(cam){
+    let fx = cam.look[0]-cam.pos[0], fy = cam.look[1]-cam.pos[1], fz = cam.look[2]-cam.pos[2];
+    const fl = Math.hypot(fx, fy, fz) || 1; fx/=fl; fy/=fl; fz/=fl;
+    let rx = -fz, ry = 0, rz = fx;
+    const rl = Math.hypot(rx, ry, rz) || 1; rx/=rl; ry/=rl; rz/=rl;
+    let ux = ry*fz - rz*fy, uy = rz*fx - rx*fz, uz = rx*fy - ry*fx;
+    if (cam.roll){
+      const c = Math.cos(cam.roll), s = Math.sin(cam.roll);
+      const nrx = rx*c + ux*s, nry = ry*c + uy*s, nrz = rz*c + uz*s;
+      const nux = ux*c - rx*s, nuy = uy*c - ry*s, nuz = uz*c - rz*s;
+      rx=nrx; ry=nry; rz=nrz; ux=nux; uy=nuy; uz=nuz;
+    }
+    return { fw:[fx,fy,fz], rt:[rx,ry,rz], up:[ux,uy,uz] };
+  }
+  buildProjection(cam){
+    const m = this._m = this.rotM();
+    const b = this._b = this.basis(cam);
+    this._cam = cam;
+    const NU = this.NU, NV = this.NV;
+    const focal = this.focal;
+    const cx = this.W / 2, cy = this.H / 2;
+    const pv = [], pn = [], pc = [];
+    for (let i = 0; i < NU; i++){
+      const vr = [], nr = [];
+      for (let j = 0; j < NV; j++){
+        const p = this.verts[i][j], n = this.norms[i][j];
+        const X = m[0]*p[0]+m[1]*p[1]+m[2]*p[2];
+        const Y = m[3]*p[0]+m[4]*p[1]+m[5]*p[2];
+        const Z = m[6]*p[0]+m[7]*p[1]+m[8]*p[2];
+        const dx = X-cam.pos[0], dy = Y-cam.pos[1], dz = Z-cam.pos[2];
+        const vz = dx*b.fw[0] + dy*b.fw[1] + dz*b.fw[2];
+        const vx = dx*b.rt[0] + dy*b.rt[1] + dz*b.rt[2];
+        const vy = dx*b.up[0] + dy*b.up[1] + dz*b.up[2];
+        const k = focal / Math.max(0.25, vz);
+        vr.push([cx + vx*k, cy - vy*k, vz]);
+        nr.push([m[0]*n[0]+m[1]*n[1]+m[2]*n[2], m[3]*n[0]+m[4]*n[1]+m[5]*n[2], m[6]*n[0]+m[7]*n[1]+m[8]*n[2]]);
+      }
+      pv.push(vr); pn.push(nr);
+      const c0 = this.center[i];
+      const CX = m[0]*c0[0]+m[1]*c0[1]+m[2]*c0[2];
+      const CY = m[3]*c0[0]+m[4]*c0[1]+m[5]*c0[2];
+      const CZ = m[6]*c0[0]+m[7]*c0[1]+m[8]*c0[2];
+      const dx = CX-cam.pos[0], dy = CY-cam.pos[1], dz = CZ-cam.pos[2];
+      const vz = dx*b.fw[0] + dy*b.fw[1] + dz*b.fw[2];
+      const vx = dx*b.rt[0] + dy*b.rt[1] + dz*b.rt[2];
+      const vy = dx*b.up[0] + dy*b.up[1] + dz*b.up[2];
+      const k = focal / Math.max(0.25, vz);
+      pc.push([cx + vx*k, cy - vy*k, vz]);
+    }
+    this.pv = pv; this.pn = pn; this.pc = pc;
+  }
+  projLocal(p){
+    const m = this._m, b = this._b, cam = this._cam;
+    const X = m[0]*p[0]+m[1]*p[1]+m[2]*p[2];
+    const Y = m[3]*p[0]+m[4]*p[1]+m[5]*p[2];
+    const Z = m[6]*p[0]+m[7]*p[1]+m[8]*p[2];
+    const dx = X-cam.pos[0], dy = Y-cam.pos[1], dz = Z-cam.pos[2];
+    const vz = dx*b.fw[0] + dy*b.fw[1] + dz*b.fw[2];
+    const vx = dx*b.rt[0] + dy*b.rt[1] + dz*b.rt[2];
+    const vy = dx*b.up[0] + dy*b.up[1] + dz*b.up[2];
+    const k = this.focal / Math.max(0.25, vz);
+    return [this.W/2 + vx*k, this.H/2 - vy*k, vz];
+  }
+
+  /* ==================== controls ==================== */
   bindControls(){
     const cv = this.cv;
     cv.style.cursor = 'grab';
@@ -2180,31 +2433,17 @@ class Ring3D {
       if (!this.drag) return;
       const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y;
       this.drag = { x:e.clientX, y:e.clientY };
-      this.yaw += dx * 0.009;
-      this.tilt = Math.max(0.20, Math.min(1.42, this.tilt + dy * 0.006));
+      this.yaw += dx * 0.010;
+      this.tilt = Math.max(-1.0, Math.min(1.0, this.tilt + dy * 0.007));
     });
     window.addEventListener('mouseup', () => { this.drag = null; cv.style.cursor = 'grab'; });
     cv.addEventListener('wheel', e => {
       e.preventDefault();
-      this.zoom = Math.max(0.55, Math.min(2.4, this.zoom * (1 - e.deltaY * 0.0013)));
+      this.zoom = Math.max(0.55, Math.min(2.6, this.zoom * (1 - e.deltaY * 0.0013)));
     }, { passive:false });
     cv.addEventListener('dblclick', () => {
-      this.yaw = 0; this.tilt = 0.92; this.zoom = 1; this.autoSpin = true; this.manual = false;
+      this.yaw = 0; this.tilt = 0.22; this.zoom = 1; this.autoSpin = true; this.manual = false;
     });
-  }
-  spawnBolt(){
-    const gap = Math.random() < 0.55;
-    const u0 = Math.random() * Math.PI * 2;
-    const span = (0.3 + Math.random() * 0.7) * (Math.random() < 0.5 ? -1 : 1);
-    this.bolts.push({
-      kind: gap ? 'gap' : 'rim',
-      u0, u1: u0 + span,
-      seed: (Math.random() * 1e6) | 0,
-      life: 1,
-      decay: gap ? 1.2 + Math.random() * 0.9 : 0.8 + Math.random() * 0.7,
-      col: Math.random() < 0.42 ? [255, 255, 255] : (Math.random() < 0.5 ? [57, 255, 168] : [34, 230, 255])
-    });
-    this.flash = 1;
   }
   resize(){
     const r = this.cv.getBoundingClientRect();
@@ -2214,248 +2453,430 @@ class Ring3D {
       this.cv.width = Math.round(w * dpr); this.cv.height = Math.round(h * dpr);
     }
     this.W = this.cv.width; this.H = this.cv.height; this.dpr = dpr;
+    this.updateFocal();
+  }
+  /* the focal length is fitted to the shape so the ∞ never clips the frame */
+  updateFocal(){
+    const d = 3.42;
+    const hx = this.mode === 'donut' ? 1.20 : 1.22;
+    const hy = this.mode === 'donut' ? 1.20 : 1.01;
+    this.focal = Math.min(0.81 * this.W * d / (2 * hx), 0.81 * this.H * d / (2 * hy));
   }
   setValue(p){ this.target = Math.max(0, Math.min(100, p || 0)); }
+
+  /* ==================== simulation ==================== */
+  spawnBolt(){
+    this.bolts.push({
+      u: Math.random(), dir: Math.random() < 0.5 ? -1 : 1,
+      sp: 0.14 + Math.random() * 0.22,
+      len: 0.09 + Math.random() * 0.15,
+      seed: (Math.random() * 1e6) | 0,
+      life: 1, decay: 0.5 + Math.random() * 0.55,
+      col: Math.random() < 0.45 ? LOOP_LIME : (Math.random() < 0.6 ? LOOP_CYAN : LOOP_HOT)
+    });
+  }
+  spawnArc(){
+    const cols = [[255,255,255], LOOP_CYAN, LOOP_LIME, LOOP_VIOLET, LOOP_HOT];
+    this.arcs.push({
+      ang: Math.random() * LOOP_TAU,
+      x: Math.random() * this.W, y: Math.random() * this.H,
+      len: Math.max(this.W, this.H) * (0.7 + Math.random() * 0.7),
+      seed: (Math.random() * 1e6) | 0,
+      life: 1, decay: 1.5 + Math.random() * 1.3,
+      col: cols[(Math.random() * cols.length) | 0]
+    });
+    this.flash = 1;
+    this.shake = 1;
+  }
   step(dt){
+    this.dt = dt;
     this.pct += (this.target - this.pct) * Math.min(1, dt * 4);
-    if (this.autoSpin) this.yaw += dt * 0.30;
     this.drift += dt;
-    if (!this.manual) this.tilt = 0.92 + Math.sin(this.drift * 0.45) * 0.34;
-    for (const m of this.motes){ m.a += m.sp * dt; if (m.a > Math.PI * 2) m.a -= Math.PI * 2; }
-    this.arcCd -= dt;
-    if (this.arcCd <= 0){
-      this.arcCd = 0.28 + Math.random() * 0.7;
-      this.spawnBolt();
+    if (this.autoSpin){
+      if (this.flight){ this.yaw += dt * 0.12; this.tilt = 0.20 + Math.sin(this.drift * 0.31) * 0.13; }
+      else { this.yaw = Math.sin(this.drift * 0.33) * 0.36; this.tilt = 0.22 + Math.sin(this.drift * 0.22) * 0.15; }
     }
+    if (this.flight) this.flightT = (this.flightT + dt * 0.052) % 1;
+    for (const mo of this.motes) mo.a += mo.sp * dt;
+
+    if (this.boltLevel > 0){
+      this.arcCd -= dt;
+      if (this.arcCd <= 0){
+        this.arcCd = this.boltLevel === 2 ? 1.0 + Math.random() * 1.8 : 3.0 + Math.random() * 3.0;
+        this.spawnArc();
+      }
+      this.boltCd -= dt;
+      if (this.boltCd <= 0){
+        this.boltCd = this.boltLevel === 2 ? 0.09 + Math.random() * 0.15 : 0.45 + Math.random() * 0.7;
+        this.spawnBolt();
+      }
+    }
+    for (const b of this.bolts) b.u += b.dir * b.sp * dt;
     for (const b of this.bolts) b.life -= b.decay * dt;
     this.bolts = this.bolts.filter(b => b.life > 0);
-    this.flash = Math.max(0, this.flash - dt * 2.6);
+    for (const a of this.arcs) a.life -= a.decay * dt;
+    this.arcs = this.arcs.filter(a => a.life > 0);
+    this.flash = Math.max(0, this.flash - dt * 2.1);
+    this.shake = Math.max(0, this.shake - dt * 3.0);
+
+    if (this.flight){
+      for (const s of this.streaks){
+        s.r += s.sp * dt * 0.6;
+        if (s.r > 1.3){ s.r = 0.02; s.a = Math.random() * LOOP_TAU; }
+      }
+    }
   }
-  pt(u, v){
-    const R = 1, r = 0.22;
-    const x = (R + r * Math.cos(v)) * Math.cos(u);
-    const y = r * Math.sin(v);
-    const z = (R + r * Math.cos(v)) * Math.sin(u);
-    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
-    const cx = Math.cos(this.tilt), sx = Math.sin(this.tilt);
-    const x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y1 = y;
-    const y2 = y1 * cx - z1 * sx, z2 = y1 * sx + z1 * cx;
-    const d = 3.2, f = 3.2 / (d - z2) * this.zoom;
-    const S = Math.min(this.W, this.H) * 0.38;
-    return [this.W / 2 + x1 * f * S, this.H / 2 - y2 * f * S, z2];
+
+  /* ==================== rendering ==================== */
+  draw(){
+    this.resize();
+    const ctx = this.ctx;
+    const cam = this.camera();
+    this.buildProjection(cam);
+
+    ctx.save();
+    if (this.shake > 0.01){
+      const k = this.shake * this.shake * 5 * this.dpr;
+      ctx.translate((Math.random() - 0.5) * k, (Math.random() - 0.5) * k);
+    }
+    ctx.clearRect(-20, -20, this.W + 40, this.H + 40);
+
+    /* ambient halo — the loop breathes light into the void */
+    const halo = ctx.createRadialGradient(this.W/2, this.H/2, this.H*.05, this.W/2, this.H/2, this.H*.72);
+    halo.addColorStop(0, 'rgba(34,230,255,.13)');
+    halo.addColorStop(.45, 'rgba(197,107,255,.07)');
+    halo.addColorStop(1, 'transparent');
+    ctx.fillStyle = halo; ctx.fillRect(0, 0, this.W, this.H);
+
+    this.drawStreaks(ctx);
+    this.drawRibbon(ctx);
+    this.drawSheen(ctx);
+    this.drawMotes(ctx);
+    this.drawStages(ctx);
+    this.drawHead(ctx);
+    this.drawBolts(ctx);
+    this.drawArcs(ctx);
+    this.drawFlash(ctx);
+
+    ctx.restore();
   }
-  /* point on the flat ring plane at a given radius — used by the rim, ticks and motes */
-  ptR(u, rad){
-    const x = rad * Math.cos(u), y = 0, z = rad * Math.sin(u);
-    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
-    const cx = Math.cos(this.tilt), sx = Math.sin(this.tilt);
-    const x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y1 = y;
-    const y2 = y1 * cx - z1 * sx, z2 = y1 * sx + z1 * cx;
-    const d = 3.2, f = 3.2 / (d - z2) * this.zoom;
-    const S = Math.min(this.W, this.H) * 0.38;
-    return [this.W / 2 + x1 * f * S, this.H / 2 - y2 * f * S, z2];
+  /* the ribbon itself — solid quads, lit, so it reads round and solid */
+  drawRibbon(ctx){
+    const NU = this.NU, NV = this.NV;
+    const frac = this.pct / 100;
+    const L = [0.30, 0.66, 0.69];
+    const Hv = [0.21, 0.47, 0.82];
+    const quads = [];
+    for (let i = 0; i < NU; i++){
+      const i2 = (i + 1) % NU;
+      const u = (i + 0.5) / NU;
+      for (let j = 0; j < NV; j++){
+        const j2 = (j + 1) % NV;
+        const p = [this.pv[i][j], this.pv[i2][j], this.pv[i2][j2], this.pv[i][j2]];
+        const depth = (p[0][2] + p[1][2] + p[2][2] + p[3][2]) / 4;
+        quads.push({ p, n:this.pn[i][j], depth, u });
+      }
+    }
+    quads.sort((a, b) => b.depth - a.depth);
+    this.sheen = [];
+    for (const q of quads){
+      const n = q.n;
+      const ndl = Math.max(0, n[0]*L[0] + n[1]*L[1] + n[2]*L[2]);
+      const ndh = Math.max(0, n[0]*Hv[0] + n[1]*Hv[1] + n[2]*Hv[2]);
+      const spec = Math.pow(ndh, 26);
+      const fres = Math.pow(1 - Math.min(1, Math.abs(n[2])), 2.6);
+      const charged = q.u <= frac;
+      /* the charge fades in behind the head instead of cutting hard */
+      const soft = frac > 0.001 ? Math.max(0, Math.min(1, (frac - q.u) / 0.028)) : 0;
+      const lit0 = frac > 0.001 ? mixc(LOOP_LIME, LOOP_CYAN, Math.min(1, q.u / frac)) : LOOP_LIME;
+      const base = mixc([38, 26, 84], lit0, soft);
+      /* the tube is a solid body: brightness lives in the colour, never in
+         the alpha — that is what stops it looking like a wire cage */
+      const sh = 0.17 + ndl * 0.92;
+      let col = [base[0]*sh, base[1]*sh, base[2]*sh];
+      col = mixc(col, [255,255,255], spec * 0.62);
+      col = mixc(col, [175, 225, 255], fres * (charged ? 0.30 : 0.46));
+      const p = q.p;
+      /* nudge every quad a hair outward so neighbours overlap and no seam
+         or wireframe line shows between them */
+      let ox = 0, oy = 0;
+      for (const v of p){ ox += v[0]; oy += v[1]; }
+      ox /= 4; oy /= 4;
+      const ex = 0.75 * this.dpr;
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++){
+        const v = p[i];
+        const dx = v[0]-ox, dy = v[1]-oy;
+        const l = Math.hypot(dx, dy) || 1;
+        const X = v[0] + dx/l*ex, Y = v[1] + dy/l*ex;
+        if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = rgb(col, 1);
+      ctx.fill();
+      if (spec > 0.55) this.sheen.push({ p, col, spec });
+    }
   }
-  /* surface normal of the tube at (u,v) */
-  norm(u, v){
-    const cx = Math.cos(v), sx = Math.sin(v);
-    const nx = cx * Math.cos(u), ny = sx, nz = cx * Math.sin(u);
-    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
-    const cx2 = Math.cos(this.tilt), sx2 = Math.sin(this.tilt);
-    const x1 = nx * cy + nz * sy, z1 = -nx * sy + nz * cy;
-    const y2 = ny * cx2 - z1 * sx2, z2 = ny * sx2 + z1 * cx2;
-    return [x1, y2, z2];
+  /* wet highlight — the single trick that makes a tube read as round */
+  drawSheen(ctx){
+    if (!this.sheen || !this.sheen.length) return;
+    ctx.globalCompositeOperation = 'lighter';
+    for (const s of this.sheen){
+      ctx.strokeStyle = rgb(s.col, .04 + s.spec * .13);
+      ctx.lineWidth = 7 * this.dpr;
+      ctx.beginPath();
+      ctx.moveTo(s.p[0][0], s.p[0][1]);
+      for (let i = 1; i < 4; i++) ctx.lineTo(s.p[i][0], s.p[i][1]);
+      ctx.closePath(); ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'source-over';
   }
-  /* real electrical discharge: a jagged channel with forked branches */
+  drawMotes(ctx){
+    const NU = this.NU;
+    for (const mo of this.motes){
+      const fi = mo.u * NU;
+      const i0 = Math.floor(fi) % NU, i1 = (i0 + 1) % NU, t = fi - Math.floor(fi);
+      const c0 = this.center[i0], c1 = this.center[i1];
+      const n0 = this.frameN[i0], n1 = this.frameN[i1];
+      const b0 = this.frameB[i0], b1 = this.frameB[i1];
+      const ca = Math.cos(mo.a) * mo.r, sa = Math.sin(mo.a) * mo.r;
+      const lx = lerp3(c0, c1, t)[0] + lerp3(n0, n1, t)[0]*ca + lerp3(b0, b1, t)[0]*sa;
+      const ly = lerp3(c0, c1, t)[1] + lerp3(n0, n1, t)[1]*ca + lerp3(b0, b1, t)[1]*sa;
+      const lz = lerp3(c0, c1, t)[2] + lerp3(n0, n1, t)[2]*ca + lerp3(b0, b1, t)[2]*sa;
+      const P = this.projLocal([lx, ly, lz]);
+      if (P[2] < 0.2) continue;
+      const sc = Math.min(1, P[2] / 2.4);
+      const g = ctx.createRadialGradient(P[0], P[1], 0, P[0], P[1], mo.s * 3.4 * this.dpr * sc);
+      g.addColorStop(0, 'rgba(150,240,255,.5)');
+      g.addColorStop(1, 'rgba(150,240,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(P[0], P[1], mo.s * 3.4 * this.dpr * sc, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(220,250,255,.8)';
+      ctx.beginPath(); ctx.arc(P[0], P[1], mo.s * .5 * this.dpr * sc, 0, 7); ctx.fill();
+    }
+  }
+  /* the five stations of the agent loop */
+  drawStages(ctx){
+    const frac = this.pct / 100;
+    let ai = 0, best = 9;
+    for (let s = 0; s < LOOP_STAGES.length; s++){
+      const u = s / LOOP_STAGES.length;
+      const d = Math.abs(((u - frac + 1.5) % 1) - 0.5);
+      if (d < best){ best = d; ai = s; }
+    }
+    this.activeStage = ai;
+    for (let s = 0; s < LOOP_STAGES.length; s++){
+      const u = s / LOOP_STAGES.length;
+      const fi = u * this.NU;
+      const i0 = Math.floor(fi) % this.NU, i1 = (i0 + 1) % this.NU, t = fi - Math.floor(fi);
+      const a = this.pc[i0], b = this.pc[i1];
+      const x = a[0] + (b[0]-a[0])*t, y = a[1] + (b[1]-a[1])*t, z = a[2] + (b[2]-a[2])*t;
+      if (z < 0.2) continue;
+      const on = s === ai;
+      const col = on ? LOOP_HOT : LOOP_CYAN;
+      const sc = Math.min(1, z / 2.2);
+      const r = (on ? 4.4 : 2.7) * this.dpr * sc;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.6);
+      g.addColorStop(0, rgb(col, on ? .95 : .45));
+      g.addColorStop(1, rgb(col, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, r * 3.6, 0, 7); ctx.fill();
+      ctx.fillStyle = rgb(on ? [255,255,255] : col, on ? 1 : .7);
+      ctx.beginPath(); ctx.arc(x, y, r * .7, 0, 7); ctx.fill();
+      if (on){
+        ctx.font = '800 ' + (9 * this.dpr) + 'px ' + getComputedStyle(document.body).fontFamily;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(235,250,255,.92)';
+        ctx.fillText(LOOP_STAGES[s], x, y - r * 3.6 - 5 * this.dpr);
+        ctx.textAlign = 'left';
+      }
+    }
+  }
+  /* the charge head riding the curve */
+  drawHead(ctx){
+    const frac = this.pct / 100;
+    if (frac < 0.004) return;
+    const NU = this.NU;
+    const fi = frac * NU;
+    const i0 = Math.floor(fi) % NU, i1 = (i0 + 1) % NU, t = fi - Math.floor(fi);
+    const a = this.pc[i0], b = this.pc[i1];
+    const hx = a[0] + (b[0]-a[0])*t, hy = a[1] + (b[1]-a[1])*t, hz = a[2] + (b[2]-a[2])*t;
+    if (hz < 0.2) return;
+    for (let k = 0; k < 13; k++){
+      const u = frac - k * 0.0055;
+      const f2 = u * NU;
+      const j0 = ((Math.floor(f2) % NU) + NU) % NU, j1 = (j0 + 1) % NU, t2 = f2 - Math.floor(f2);
+      const p0 = this.pc[j0], p1 = this.pc[j1];
+      const x = p0[0] + (p1[0]-p0[0])*t2, y = p0[1] + (p1[1]-p0[1])*t2;
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.5 * (1 - k/13)).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(x, y, (2.7 - k*0.16) * this.dpr, 0, 7); ctx.fill();
+    }
+    const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, 28 * this.dpr);
+    g.addColorStop(0, 'rgba(255,255,255,.92)');
+    g.addColorStop(.28, rgb(LOOP_CYAN, .55));
+    g.addColorStop(1, rgb(LOOP_CYAN, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(hx, hy, 28 * this.dpr, 0, 7); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(hx, hy, 3 * this.dpr, 0, 7); ctx.fill();
+  }
+  /* discharges racing INSIDE the conduit */
+  drawBolts(ctx){
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    for (const b of this.bolts){
+      const flick = 0.5 + 0.5 * Math.abs(Math.sin(this.drift * 43 + b.seed * 0.001));
+      const a0 = Math.max(0, Math.min(1, b.life)) * flick;
+      if (a0 <= 0.03) continue;
+      const pts = [];
+      const N = 12;
+      for (let i = 0; i <= N; i++){
+        const u = b.u - (i / N) * b.len * b.dir;
+        const s = this.sampleLocal(u);
+        const jx = (hash2(b.seed, i) - 0.5) * 0.19;
+        const jy = (hash2(b.seed, 60 + i) - 0.5) * 0.19;
+        const jz = (hash2(b.seed, 120 + i) - 0.5) * 0.19;
+        const P = this.projLocal([s.p[0]+jx, s.p[1]+jy, s.p[2]+jz]);
+        if (P[2] < 0.12){ pts.length = 0; break; }
+        pts.push(P);
+      }
+      if (pts.length < 3) continue;
+      this.strokeBolt(ctx, pts, b.col, a0, 1);
+      /* forks peel off the main channel */
+      const nf = 2 + ((hash2(b.seed, 7) * 2) | 0);
+      for (let k = 0; k < nf; k++){
+        const idx = 2 + Math.floor(hash2(b.seed, 20 + k) * Math.max(1, pts.length - 4));
+        const base = pts[idx];
+        let ang = hash2(b.seed, 40 + k) * Math.PI * 2;
+        const segs = 3 + ((hash2(b.seed, 70 + k) * 2) | 0);
+        const len = 11 + hash2(b.seed, 100 + k) * 20;
+        const br = [];
+        let cx = base[0], cy = base[1];
+        for (let i = 0; i < segs; i++){
+          ang += (hash2(b.seed, 140 + k * 9 + i) - 0.5) * 1.7;
+          const l = len / segs;
+          cx += Math.cos(ang) * l; cy += Math.sin(ang) * l;
+          br.push([cx, cy]);
+        }
+        this.strokeBolt(ctx, br, b.col, a0 * 0.55, 0.45);
+      }
+    }
+  }
   strokeBolt(ctx, pts, col, a0, scale){
+    const c = a => 'rgba(' + col.join(',') + ',' + a.toFixed(3) + ')';
     const path = () => {
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
     };
-    const c = a => 'rgba(' + col.join(',') + ',' + a.toFixed(3) + ')';
-    path(); ctx.strokeStyle = c(0.09 * a0); ctx.lineWidth = 13 * scale * this.dpr; ctx.stroke();
-    path(); ctx.strokeStyle = c(0.28 * a0); ctx.lineWidth = 5 * scale * this.dpr; ctx.stroke();
-    path(); ctx.strokeStyle = c(0.85 * a0); ctx.lineWidth = 1.7 * scale * this.dpr; ctx.stroke();
-    path(); ctx.strokeStyle = 'rgba(255,255,255,' + (0.95 * a0).toFixed(3) + ')'; ctx.lineWidth = 0.8 * scale * this.dpr; ctx.stroke();
+    path(); ctx.strokeStyle = c(0.07 * a0); ctx.lineWidth = 15 * scale * this.dpr; ctx.stroke();
+    path(); ctx.strokeStyle = c(0.24 * a0); ctx.lineWidth = 6.5 * scale * this.dpr; ctx.stroke();
+    path(); ctx.strokeStyle = c(0.9 * a0); ctx.lineWidth = 2.6 * scale * this.dpr; ctx.stroke();
+    path(); ctx.strokeStyle = 'rgba(255,255,255,' + a0.toFixed(3) + ')'; ctx.lineWidth = 1.1 * scale * this.dpr; ctx.stroke();
     const tip = pts[pts.length - 1];
-    const g = ctx.createRadialGradient(tip[0], tip[1], 0, tip[0], tip[1], 15 * this.dpr);
+    const g = ctx.createRadialGradient(tip[0], tip[1], 0, tip[0], tip[1], 17 * this.dpr);
     g.addColorStop(0, 'rgba(255,255,255,' + (0.9 * a0).toFixed(3) + ')');
     g.addColorStop(.4, c(0.35 * a0));
     g.addColorStop(1, c(0));
     ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(tip[0], tip[1], 15 * this.dpr, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(tip[0], tip[1], 17 * this.dpr, 0, 7); ctx.fill();
   }
-  drawForks(ctx, pts, col, a0, seed){
-    const nf = 2 + Math.floor(hash2(seed, 3) * 2);
-    for (let k = 0; k < nf; k++){
-      const idx = 1 + Math.floor(hash2(seed, 10 + k) * Math.max(1, pts.length - 3));
-      const base = pts[idx];
-      let a = hash2(seed, 40 + k) * Math.PI * 2;
-      const segs = 3 + Math.floor(hash2(seed, 70 + k) * 2);
-      const len = 10 + hash2(seed, 100 + k) * 22;
-      const br = [];
-      let cx = base[0], cy = base[1];
-      for (let i = 0; i < segs; i++){
-        a += (hash2(seed, 140 + k * 9 + i) - 0.5) * 1.7;
-        const l = len / segs;
-        cx += Math.cos(a) * l; cy += Math.sin(a) * l;
-        br.push([cx, cy]);
-      }
-      this.strokeBolt(ctx, br, col, a0 * 0.6, 0.45);
-    }
-  }
-  drawBolts(ctx){
+  /* manga-grade strikes slashing across the frame */
+  drawArcs(ctx){
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    for (const b of this.bolts){
-      const flick = 0.55 + 0.45 * Math.abs(Math.sin(this.drift * 47 + b.seed * 0.001));
-      const a0 = Math.max(0, Math.min(1, b.life)) * flick;
-      if (a0 <= 0.02) continue;
-      const main = [];
-      if (b.kind === 'gap'){
-        const A = this.ptR(b.u0, 1.0), B = this.ptR(b.u1, 1.0);
-        if (A[2] < 0.02 || B[2] < 0.02) continue;
-        const dx = B[0] - A[0], dy = B[1] - A[1];
-        const len = Math.hypot(dx, dy) || 1;
-        const px = -dy / len, py = dx / len;
-        const N = 9;
-        for (let i = 0; i <= N; i++){
-          const t = i / N;
-          const sharp = (i === 0 || i === N) ? 0 : (hash2(b.seed, i) - 0.5) * len * 0.24;
-          main.push([A[0] + dx * t + px * sharp, A[1] + dy * t + py * sharp]);
-        }
-      } else {
-        const N = 8;
-        for (let i = 0; i <= N; i++){
-          const u = b.u0 + (b.u1 - b.u0) * (i / N);
-          main.push(this.pt(u, (hash2(b.seed, i) - 0.5) * 0.9));
-        }
+    for (const a of this.arcs){
+      const flick = 0.45 + 0.55 * Math.abs(Math.sin(this.drift * 37 + a.seed * 0.001));
+      const al = Math.max(0, Math.min(1, a.life)) * flick;
+      if (al <= 0.03) continue;
+      const N = 16;
+      const dx = Math.cos(a.ang), dy = Math.sin(a.ang);
+      const px = -dy, py = dx;
+      const pts = [];
+      for (let i = 0; i <= N; i++){
+        const t = i / N;
+        const off = (i === 0 || i === N) ? 0 : (hash2(a.seed, i) - 0.5) * a.len * 0.30;
+        pts.push([a.x + dx*a.len*t + px*off, a.y + dy*a.len*t + py*off]);
       }
-      this.strokeBolt(ctx, main, b.col, a0, 1);
-      this.drawForks(ctx, main, b.col, a0, b.seed);
+      const c = v => 'rgba(' + a.col.join(',') + ',' + v.toFixed(3) + ')';
+      const path = () => {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      };
+      path(); ctx.strokeStyle = c(0.09 * al); ctx.lineWidth = 22 * this.dpr; ctx.stroke();
+      path(); ctx.strokeStyle = c(0.28 * al); ctx.lineWidth = 9 * this.dpr; ctx.stroke();
+      path(); ctx.strokeStyle = 'rgba(255,255,255,' + (0.92 * al).toFixed(3) + ')'; ctx.lineWidth = 3.2 * this.dpr; ctx.stroke();
+      /* forks */
+      const nf = 2 + ((hash2(a.seed, 11) * 3) | 0);
+      for (let k = 0; k < nf; k++){
+        const idx = 2 + Math.floor(hash2(a.seed, 30 + k) * (pts.length - 4));
+        const base = pts[idx];
+        let ang = a.ang + (hash2(a.seed, 50 + k) - 0.5) * 2.4;
+        const segs = 3 + ((hash2(a.seed, 80 + k) * 2) | 0);
+        const len = 20 + hash2(a.seed, 110 + k) * 44;
+        const br = [];
+        let cx = base[0], cy = base[1];
+        for (let i = 0; i < segs; i++){
+          ang += (hash2(a.seed, 150 + k * 7 + i) - 0.5) * 1.9;
+          const l = len / segs;
+          cx += Math.cos(ang) * l; cy += Math.sin(ang) * l;
+          br.push([cx, cy]);
+        }
+        const bp = () => {
+          ctx.beginPath();
+          ctx.moveTo(br[0][0], br[0][1]);
+          for (let i = 1; i < br.length; i++) ctx.lineTo(br[i][0], br[i][1]);
+        };
+        bp(); ctx.strokeStyle = c(0.08 * al); ctx.lineWidth = 11 * this.dpr; ctx.stroke();
+        bp(); ctx.strokeStyle = c(0.30 * al); ctx.lineWidth = 4 * this.dpr; ctx.stroke();
+        bp(); ctx.strokeStyle = 'rgba(255,255,255,' + (0.7 * al).toFixed(3) + ')'; ctx.lineWidth = 1.4 * this.dpr; ctx.stroke();
+      }
+      /* impact burst */
+      ctx.globalCompositeOperation = 'lighter';
+      const bx = pts[0][0], by = pts[0][1];
+      for (let i = 0; i < 14; i++){
+        const ang = (i / 14) * LOOP_TAU + a.seed * 0.0001;
+        const r0 = 8 * this.dpr, r1 = (26 + hash2(a.seed, 200 + i) * 60) * this.dpr;
+        ctx.strokeStyle = c(0.28 * al);
+        ctx.lineWidth = 1.4 * this.dpr;
+        ctx.beginPath();
+        ctx.moveTo(bx + Math.cos(ang)*r0, by + Math.sin(ang)*r0);
+        ctx.lineTo(bx + Math.cos(ang)*r1, by + Math.sin(ang)*r1);
+        ctx.stroke();
+      }
+      const bg = ctx.createRadialGradient(bx, by, 0, bx, by, 42 * this.dpr);
+      bg.addColorStop(0, 'rgba(255,255,255,' + (0.7 * al).toFixed(3) + ')');
+      bg.addColorStop(1, c(0));
+      ctx.fillStyle = bg;
+      ctx.beginPath(); ctx.arc(bx, by, 42 * this.dpr, 0, 7); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
     }
   }
-  draw(){
-    this.resize();
-    const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.W, this.H);
-    const frac = this.pct / 100;
-    const NU = 88, NV = 16;
-    const L = [0.28, 0.84, 0.46];
-    const quads = [];
-    for (let i = 0; i < NU; i++){
-      const u0 = (i / NU) * Math.PI * 2, u1 = ((i + 1) / NU) * Math.PI * 2;
-      for (let j = 0; j < NV; j++){
-        const v0 = (j / NV) * Math.PI * 2, v1 = ((j + 1) / NV) * Math.PI * 2;
-        const mid = (u0 + u1) / 2, midv = (v0 + v1) / 2;
-        const q = [this.pt(u0, v0), this.pt(u1, v0), this.pt(u1, v1), this.pt(u0, v1)];
-        const depth = (q[0][2] + q[1][2] + q[2][2] + q[3][2]) / 4;
-        const n = this.norm(mid, midv);
-        const spec = Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2]);
-        quads.push({ q, depth, mid, active:mid <= frac * Math.PI * 2, spec });
-      }
-    }
-    quads.sort((a, b) => b.depth - a.depth);
-
-    /* ambient halo behind the gauge */
-    const halo = ctx.createRadialGradient(this.W / 2, this.H / 2, this.H * .08, this.W / 2, this.H / 2, this.H * .55);
-    halo.addColorStop(0, 'rgba(57,255,168,.14)');
-    halo.addColorStop(.5, 'rgba(34,230,255,.09)');
-    halo.addColorStop(1, 'transparent');
-    ctx.fillStyle = halo; ctx.fillRect(0, 0, this.W, this.H);
-
-    /* the torus */
-    const bloom = [];
-    for (const qu of quads){
-      const p = qu.q;
-      ctx.beginPath();
-      ctx.moveTo(p[0][0], p[0][1]);
-      for (let i = 1; i < 4; i++) ctx.lineTo(p[i][0], p[i][1]);
-      ctx.closePath();
-      if (qu.active){
-        const t = frac > 0.001 ? Math.min(1, qu.mid / (frac * Math.PI * 2)) : 0;
-        const base = mixc(RING_LIME, RING_CYAN, t);
-        const lit = (qu.depth + 1.6) / 3.2;
-        const col = mixc(base, [255, 255, 255], qu.spec * 0.3);
-        ctx.fillStyle = rgb(col, Math.min(1, 0.2 + lit * 0.36 + qu.spec * 0.3));
-        ctx.fill();
-        ctx.strokeStyle = rgb(col, Math.min(.9, .42 + qu.spec * .4));
-        ctx.lineWidth = this.dpr; ctx.stroke();
-        if (qu.spec > 0.55) bloom.push({ p, col, spec:qu.spec });
-      } else {
-        ctx.strokeStyle = 'rgba(34,230,255,.20)';
-        ctx.lineWidth = .7 * this.dpr; ctx.stroke();
-      }
-    }
-    /* specular bloom */
+  drawFlash(ctx){
+    if (this.flash <= 0.01) return;
     ctx.globalCompositeOperation = 'lighter';
-    for (const b of bloom){
-      ctx.strokeStyle = rgb(b.col, .07 + b.spec * .16);
-      ctx.lineWidth = 7 * this.dpr;
-      ctx.beginPath();
-      ctx.moveTo(b.p[0][0], b.p[0][1]);
-      for (let i = 1; i < 4; i++) ctx.lineTo(b.p[i][0], b.p[i][1]);
-      ctx.closePath(); ctx.stroke();
+    const g = ctx.createRadialGradient(this.W/2, this.H/2, 0, this.W/2, this.H/2, Math.max(this.W, this.H)*0.75);
+    g.addColorStop(0, 'rgba(150,225,255,' + (0.16 * this.flash).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(150,225,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, this.W, this.H);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  /* warp streaks — only while the camera is flying */
+  drawStreaks(ctx){
+    if (!this.flight) return;
+    const cx = this.W/2, cy = this.H/2;
+    const R = Math.max(this.W, this.H);
+    ctx.globalCompositeOperation = 'lighter';
+    for (const s of this.streaks){
+      const r0 = s.r * R * 0.55;
+      const r1 = r0 + s.l * R * 0.30;
+      const x0 = cx + Math.cos(s.a)*r0, y0 = cy + Math.sin(s.a)*r0*0.82;
+      const x1 = cx + Math.cos(s.a)*r1, y1 = cy + Math.sin(s.a)*r1*0.82;
+      ctx.strokeStyle = 'rgba(140,225,255,' + (0.30 * (1 - s.r)).toFixed(3) + ')';
+      ctx.lineWidth = 1.2 * this.dpr;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
     }
     ctx.globalCompositeOperation = 'source-over';
-
-    /* outer rim */
-    ctx.lineWidth = 1.1 * this.dpr;
-    for (let i = 0; i < 132; i++){
-      const u0 = (i / 132) * Math.PI * 2, u1 = ((i + 1) / 132) * Math.PI * 2;
-      const A = this.ptR(u0, 1.24), B = this.ptR(u1, 1.24);
-      if (A[2] < 0 || B[2] < 0) continue;
-      const on = u0 <= frac * Math.PI * 2;
-      ctx.strokeStyle = on ? 'rgba(57,255,168,.5)' : 'rgba(34,230,255,.14)';
-      ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke();
-    }
-    /* graduation ticks */
-    for (let i = 0; i < 24; i++){
-      const u = (i / 24) * Math.PI * 2;
-      const A = this.ptR(u, 1.25), B = this.ptR(u, i % 6 === 0 ? 1.38 : 1.33);
-      if (A[2] < 0) continue;
-      const on = u <= frac * Math.PI * 2;
-      ctx.strokeStyle = on ? 'rgba(57,255,168,.75)' : 'rgba(34,230,255,.22)';
-      ctx.lineWidth = (i % 6 === 0 ? 1.6 : 1) * this.dpr;
-      ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke();
-    }
-    /* orbiting motes */
-    for (const m of this.motes){
-      const P = this.ptR(m.a, m.r);
-      if (P[2] < 0) continue;
-      const on = m.a <= frac * Math.PI * 2;
-      const col = on ? RING_LIME : RING_CYAN;
-      ctx.fillStyle = rgb(col, .10);
-      ctx.beginPath(); ctx.arc(P[0], P[1], m.s * 4.5, 0, 7); ctx.fill();
-      ctx.fillStyle = rgb(col, .9);
-      ctx.beginPath(); ctx.arc(P[0], P[1], m.s, 0, 7); ctx.fill();
-    }
-    /* leading edge comet */
-    if (frac > 0.01){
-      const u = frac * Math.PI * 2;
-      for (let k = 0; k < 10; k++){
-        const uu = u - k * 0.035;
-        const p = this.pt(uu, Math.PI / 2);
-        ctx.fillStyle = 'rgba(255,255,255,' + (0.5 * (1 - k / 10)).toFixed(3) + ')';
-        ctx.beginPath(); ctx.arc(p[0], p[1], (2.6 - k * 0.2) * this.dpr, 0, 7); ctx.fill();
-      }
-      const p = this.pt(u, Math.PI / 2);
-      const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], 22 * this.dpr);
-      g.addColorStop(0, 'rgba(255,255,255,.85)');
-      g.addColorStop(.35, 'rgba(57,255,168,.5)');
-      g.addColorStop(1, 'rgba(57,255,168,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(p[0], p[1], 22 * this.dpr, 0, 7); ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.arc(p[0], p[1], 3 * this.dpr, 0, 7); ctx.fill();
-    }
-    /* energy core behind the readout */
-    const cg = ctx.createRadialGradient(this.W / 2, this.H / 2, 0, this.W / 2, this.H / 2, this.H * .22);
-    cg.addColorStop(0, 'rgba(57,255,168,' + (0.10 + frac * 0.14 + this.flash * 0.16).toFixed(3) + ')');
-    cg.addColorStop(1, 'rgba(57,255,168,0)');
-    ctx.fillStyle = cg;
-    ctx.beginPath(); ctx.arc(this.W / 2, this.H / 2, this.H * .22, 0, 7); ctx.fill();
-    /* electricity on top of everything */
-    this.drawBolts(ctx);
   }
 }
 
@@ -2463,11 +2884,11 @@ class Ring3D {
    INSTANCES
    ================================================================== */
 const GLOBE = new Globe($('globe'));
-const RING = new Ring3D($('ring3d'));
+const LOOP = new Loop3D($('ring3d'));
 const BARS_OV = new Bars3D($('bars3d'), {maxBars:38, showFloor:true, savedLine:true});
 const BARS_ACT = new Bars3D($('bars-act'), {maxBars:44, showFloor:true, savedLine:true});
 const BARS_MDL = new Bars3D($('bars-mdl'), {maxBars:12, showFloor:true, savedLine:false, labelMode:'raw', valueLabel:'saved', maxBarW:0.12});
-const RENDERERS = [GLOBE, RING, BARS_OV, BARS_ACT, BARS_MDL];
+const RENDERERS = [GLOBE, LOOP, BARS_OV, BARS_ACT, BARS_MDL];
 
 function RESIZE_ALL(){
   for (const r of RENDERERS) if (r.resize) r.resize();
@@ -2482,7 +2903,7 @@ function frame(now){
   if (!S.paused){
     const view = document.querySelector('.view.on');
     const v = view ? view.id.replace('v-', '') : 'overview';
-    if (v === 'overview'){ GLOBE.step(dt); GLOBE.draw(); RING.step(dt); RING.draw(); BARS_OV.step(dt); BARS_OV.draw(); }
+    if (v === 'overview'){ GLOBE.step(dt); GLOBE.draw(); LOOP.step(dt); LOOP.draw(); syncLoopStages(); BARS_OV.step(dt); BARS_OV.draw(); }
     if (v === 'activity'){ BARS_ACT.step(dt); BARS_ACT.draw(); }
     if (v === 'models'){ BARS_MDL.step(dt); BARS_MDL.draw(); }
   }
@@ -2626,6 +3047,64 @@ function initGraphControls(){
   });
 }
 
+/* ==================== AGENT LOOP CONTROLS ==================== */
+/* The beigne is an instrument now: shape, flight, storm level, spin, gauge. */
+function initLoopControls(){
+  const hud = $('loop-hud');
+  if (!hud) return;
+  const shapeBtn = hud.querySelector('[data-lp="shape"]');
+  const flightBtn = hud.querySelector('[data-lp="flight"]');
+  const boltBtn = hud.querySelector('[data-lp="bolt"]');
+  const spinBtn = hud.querySelector('[data-lp="spin"]');
+  const badge = $('ring-badge');
+
+  hud.addEventListener('click', e => {
+    const b = e.target.closest('[data-lp]');
+    if (!b) return;
+    const k = b.dataset.lp;
+    if (k === 'shape'){
+      const toDonut = LOOP.mode === 'loop';
+      LOOP.setMode(toDonut ? 'donut' : 'loop');
+      shapeBtn.textContent = toDonut ? '◎ DONUT' : '∞ LOOP';
+      if (badge) badge.textContent = toDonut ? '3D TORUS' : '∞ LEMNISCATE';
+    }
+    else if (k === 'flight'){
+      const on = !LOOP.flight;
+      LOOP.setFlight(on);
+      flightBtn.classList.toggle('on', on);
+      flightBtn.textContent = on ? '◈ FLIGHT' : 'FLIGHT';
+      if (badge && on) badge.textContent = 'NAVIGATING';
+    }
+    else if (k === 'bolt'){
+      const next = (LOOP.boltLevel + 1) % 3;
+      LOOP.setBolts(next);
+      boltBtn.classList.toggle('on', next > 0);
+      boltBtn.textContent = next === 0 ? 'BOLTS' : (next === 1 ? '⚡ BOLTS' : '⚡ STORM');
+    }
+    else if (k === 'spin'){
+      LOOP.autoSpin = !LOOP.autoSpin;
+      LOOP.manual = !LOOP.autoSpin;
+      spinBtn.classList.toggle('on', LOOP.autoSpin);
+    }
+    else if (k === 'thin'){ LOOP.setThick(Math.max(0.6, +(LOOP.thick - 0.2).toFixed(2))); }
+    else if (k === 'thick'){ LOOP.setThick(Math.min(1.8, +(LOOP.thick + 0.2).toFixed(2))); }
+  });
+
+  const el = $('loop-stages');
+  if (el && !el.children.length)
+    el.innerHTML = LOOP_STAGES.map(s => '<span>' + esc(s) + '</span>').join('');
+}
+
+/* the station chips follow the charge head around the loop */
+function syncLoopStages(){
+  const el = $('loop-stages');
+  if (!el || !el.children.length) return;
+  const a = LOOP.activeStage;
+  if (a === LOOP._stageShown) return;
+  LOOP._stageShown = a;
+  for (let i = 0; i < el.children.length; i++) el.children[i].classList.toggle('on', i === a);
+}
+
 async function loadStats(){
   try{
     const d = await (await fetch('/api/dashboard-stats')).json();
@@ -2677,8 +3156,8 @@ async function loadMetrics(){
     $('ov-miss').textContent = fmt(m.misses);
     $('n-req').textContent = fmt(m.requests);
 
-    // ring gauge
-    RING.setValue(m.hit_rate_pct || 0);
+    // the agent loop gauge
+    LOOP.setValue(m.hit_rate_pct || 0);
     $('ring-val').textContent = (m.hit_rate_pct || 0).toFixed(1) + '%';
 
     // legend (real counts, no more phantom bypass)
@@ -2930,6 +3409,7 @@ document.addEventListener('keydown', e => {
 $('refr-sel').value = '5';
 setRefresh(5000);
 initGraphControls();
+initLoopControls();
 refreshAll(false);
 setTimeout(loadSeries, 120);
 setTimeout(() => {
