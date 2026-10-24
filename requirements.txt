@@ -20,6 +20,9 @@ mcp-types==2.3.0
 pyahocorasick==2.3.1
 nltk==3.10.4
 
+# --- Config YAML (resolution des secrets "@hermes:" dans tool_proxy) ---
+pyyaml==6.0.3
+
 # --- System tray (Windows) ---
 pystray==0.19.5
 pillow==13.0.0

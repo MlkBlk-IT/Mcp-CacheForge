@@ -1,11 +1,11 @@
-# D:\CacheForge\restart_tray.ps1
-# Redémarre CacheForge en arrière-plan SANS bloquer PowerShell
+﻿# D:\IcyCache\restart_tray.ps1
+# Redémarre IcyCache en arrière-plan SANS bloquer PowerShell
 
 $ErrorActionPreference = "Stop"
-$pythonw = "D:\CacheForge\venv\Scripts\pythonw.exe"
-$script = "D:\CacheForge\tray.py"
-$workDir = "D:\CacheForge"
-$taskName = "CacheForge-Tray"
+$pythonw = "D:\IcyCache\venv\Scripts\pythonw.exe"
+$script = "D:\IcyCache\tray.py"
+$workDir = "D:\IcyCache"
+$taskName = "IcyCache-Tray"
 
 # 1. Arrêter toute instance précédente
 Write-Host "🛑 Arrêt des instances précédentes..." -NoNewline
@@ -36,34 +36,24 @@ $portProcs | Select-Object -Unique | ForEach-Object {
 Write-Host " ✓" -ForegroundColor Green
 Start-Sleep -Seconds 1
 
-# 2. (Re)créer la tâche planifiée (auto-start au logon)
-Write-Host "📋 Installation tâche planifiée..." -NoNewline
+# 2. Vérifier la tâche planifiée (auto-start au logon)
+#    NE PAS tenter de la (re)créer ici : le fichier de tâche appartient aux
+#    Administrateurs, donc Unregister-ScheduledTask échoue sans élévation et
+#    interrompait tout le redémarrage du service. On se contente de
+#    constater son état ; l'installation se fait via tools\fix_scheduled_task.ps1
+#    (lancé en admin) ou install_autostart.ps1.
+Write-Host "📋 Vérification tâche planifiée..." -NoNewline
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existing) {
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-}
-
-$action = New-ScheduledTaskAction -Execute $pythonw -Argument "`"$script`"" -WorkingDirectory $workDir
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -RestartCount 3 `
-    -RestartInterval (New-TimeSpan -Minutes 1)
-
-try {
-    Register-ScheduledTask `
-        -TaskName $taskName `
-        -Action $action `
-        -Trigger $trigger `
-        -Settings $settings `
-        -Description "CacheForge proxy + MCP launcher" `
-        -RunLevel Limited | Out-Null
-    Write-Host " ✓" -ForegroundColor Green
-} catch {
-    Write-Host " ⚠ Task Scheduler non disponible, démarrage manuel uniquement" -ForegroundColor Yellow
+    $act = ($existing.Actions | Select-Object -First 1)
+    $exe = "$($act.Execute) $($act.Arguments)"
+    if ($exe -like "*$script*") {
+        Write-Host " ✓ '$taskName' OK" -ForegroundColor Green
+    } else {
+        Write-Host " ⚠ '$taskName' pointe ailleurs ($exe) — exécuter tools\fix_scheduled_task.ps1 en admin" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host " ⚠ '$taskName' absente — le repli Startup folder assure l'auto-démarrage" -ForegroundColor Yellow
 }
 
 # 3. Démarrer MAINTENANT en arrière-plan (non-bloquant, zéro fenêtre)
@@ -90,19 +80,19 @@ for ($i = 0; $i -lt 15; $i++) {
 if ($up) {
     Write-Host " ✓ UP" -ForegroundColor Green
     Write-Host ""
-    Write-Host "✅ CacheForge actif:" -ForegroundColor Cyan
+    Write-Host "✅ IcyCache actif:" -ForegroundColor Cyan
     Write-Host "   • Proxy  : http://localhost:8080"
     Write-Host "   • MCP    : http://localhost:8081"
     Write-Host "   • Dashboard : http://localhost:8080/dashboard"
     Write-Host ""
     Write-Host "📌 Redémarre automatiquement à chaque logon Windows"
-    Write-Host "📌 Logs : D:\CacheForge\logs\app.log"
+    Write-Host "📌 Logs : D:\IcyCache\logs\app.log"
 } else {
     Write-Host " ✗ TIMEOUT" -ForegroundColor Red
     Write-Host ""
     Write-Host "⚠ Le serveur n'a pas démarré en 7.5s."
     Write-Host "   Vérifie les logs :"
-    Write-Host "   Get-Content D:\CacheForge\logs\app.log -Tail 30"
+    Write-Host "   Get-Content D:\IcyCache\logs\app.log -Tail 30"
     Write-Host ""
     Write-Host "   Test manuel (avec console visible) :"
     Write-Host "   .\venv\Scripts\python.exe tray.py"

@@ -12,16 +12,86 @@
     "transport": [
       "stdio",
       "sse"
-    ]
+    ],
+    "_note": "8081 = transport SSE (clients legacy / Hermes). Le transport moderne streamable-http ecoute sur mcp_http.port."
+  },
+  "mcp_http": {
+    "host": "127.0.0.1",
+    "port": 8084,
+    "_note": "Streamable HTTP (transport standard des clients MCP recents). Endpoint: http://127.0.0.1:8084/mcp"
   },
   "cache": {
-    "db_path": "D:\\IcyCache\\db\\cache.db",
-    "max_entries": 10000,
-    "enable_semantic": false,
-    "semantic_threshold": 0.95,
-    "ttl_seconds": 86400
-  },
-  "normalization": {
+      "db_path": "D:\\IcyCache\\db\\cache.db",
+      "max_entries": 10000,
+      "enable_semantic": false,
+      "semantic_threshold": 0.95,
+      "ttl_seconds": 86400
+    },
+    "tool_cache": {
+      "enabled": true,
+      "ttl_seconds": 3600,
+      "window_seconds": 300,
+      "tools": {
+        "warn_after": 3,
+        "block_after": 5,
+        "max_cycle_len": 3
+      }
+    },
+    "tool_proxy": {
+      "list_cache_seconds": 30,
+      "_note": "Jetons de portabilite: {PROJECT_ROOT} = racine du projet, {PYTHON} = interpreteur du venv. Le cache d'outils est OPT-IN; 'cache_tools' = allowlist stricte; sinon 'cache: true' active la detection anti-ecriture (create_/write_/delete_/push_... jamais caches).",
+      "servers": {
+        "fetch": {
+          "command": "uvx",
+          "args": ["mcp-server-fetch@2026.10.10"],
+          "cache": true
+        },
+        "github": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-github"],
+          "env": {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "@hermes:mcp_servers.github"
+          },
+          "cache": true,
+          "cache_tools": {
+            "_note": "Allowlist stricte des outils de LECTURE reels de @modelcontextprotocol/server-github (26 outils au total). Les 12 outils d'ecriture (create_*, push_files, fork_repository, merge_*, update_*) ne sont JAMAIS mis en cache: sinon l'ecriture est sautee silencieusement.",
+            "search_issues": true,
+            "search_code": true,
+            "search_repositories": true,
+            "search_users": true,
+            "get_issue": true,
+            "get_pull_request": true,
+            "get_pull_request_files": true,
+            "get_pull_request_status": true,
+            "get_pull_request_comments": true,
+            "get_pull_request_reviews": true,
+            "get_file_contents": true,
+            "list_issues": true,
+            "list_pull_requests": true,
+            "list_commits": true
+          }
+        },
+        "qwen-chroma": {
+          "command": "C:\\AI\\EmbeddingDB\\.venv\\Scripts\\python.exe",
+          "args": ["C:\\AI\\EmbeddingDB\\hermes_qdrant_mcp.py"],
+          "cache": true,
+          "ttl_seconds": 86400,
+          "_note": "cache: true + detection anti-ecriture: memory_search_tool / hybrid_search_tool / memory_stats_tool sont caches; memory_add_tool / memory_delete_tool / rebuild_bm25_index_tool sont executes a chaque appel."
+        },
+        "pwsh": {
+          "command": "uvx",
+          "args": ["pwsh-exec@1.0.1"],
+          "cache": false
+        },
+        "time": {
+          "command": "{PYTHON}",
+          "args": ["{PROJECT_ROOT}/src/server.py", "--mode", "mcp-stdio"],
+          "cache": false,
+          "_note": "{PYTHON} = venv du projet. Un 'python' nu resolvait vers C:\\Python314 (sans fastapi/mcp) et le serveur demarrait en erreur."
+        }
+      }
+    },
+    "normalization": {
     "remove_politeness": true,
     "canonical_synonyms": {
       "config": "configuration",

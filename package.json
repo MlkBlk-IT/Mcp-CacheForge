@@ -1,0 +1,8 @@
+{
+  "name": "icycache",
+  "version": "0.1.0",
+  "description": "IcyCache - I see cache. Instant LLM + tool caching for AI agents.",
+  "main": "index.js",
+  "repository": "https://github.com/MlkBlk-IT/icycache",
+  "license": "MIT"
+}

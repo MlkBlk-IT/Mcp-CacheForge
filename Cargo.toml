@@ -1,0 +1,8 @@
+[package]
+name = "icycache"
+version = "0.1.0"
+edition = "2021"
+description = "IcyCache - I see cache. Instant LLM + tool caching for AI agents."
+license = "MIT"
+repository = "https://github.com/MlkBlk-IT/icycache"
+[dependencies]

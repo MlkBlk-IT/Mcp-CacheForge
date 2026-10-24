@@ -1,5 +1,5 @@
 r"""Test OFFLINE du PrefixProxy avec un faux fournisseur: aucune cle API, aucun appel reseau externe.
-Lancer: D:\CacheForge\venv\Scripts\python.exe D:\CacheForge\tests\test_prefix_proxy.py"""
+Lancer: venv\Scripts\python.exe tests\test_prefix_proxy.py"""
 import os, sys, json, time, tempfile, threading
 from pathlib import Path
 
@@ -129,4 +129,8 @@ check("7 stats openai: requests=3, lu=3072, total_in=4500, equiv=None",
       (o["requests"], o["cache_read_tokens"], o["input_tokens_total"], o["equiv_saved_input_tokens"]) == (3, 3072, 4500, None))
 
 print("\nRESULTAT: %d/%d PASS" % (sum(results), len(results)))
+# os._exit() ignore le tampon de sortie: sans flush explicite, les lignes
+# PASS/FAIL disparaissent quand stdout est un pipe.
+sys.stdout.flush()
+sys.stderr.flush()
 os._exit(0 if all(results) else 1)

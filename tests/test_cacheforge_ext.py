@@ -148,7 +148,7 @@ check("A2 stream coupe: visible dans app.log", "STREAM ABORTED" in lt or "STREAM
 # --- item 8: export ---
 r = httpx.get(BASE + "/api/metrics/export", timeout=30)
 j = r.json()
-check("X1 export: schema + events + summary", r.status_code == 200 and j["schema"].startswith("cacheforge.metrics.export")
+check("X1 export: schema + events + summary", r.status_code == 200 and j["schema"].startswith("icycache.metrics.export")
       and j["count"] == len(j["events"]) > 0 and {"kind", "hash", "prompt_tokens", "saved_prompt", "ts"} <= set(j["events"][0])
       and "pct_saved" in j["summary"])
 check("X2 export ?since filtre", httpx.get(BASE + "/api/metrics/export", params={"since": "2999-01-01 00:00:00"},
@@ -166,7 +166,7 @@ check("X6 cache-clear avec header -> 200 + vide", r.status_code == 200 and db_co
       f"status={r.status_code}")
 
 # --- item 2 (P3): bordures de mots (in-process, normalizer reel) ---
-sys.path.insert(0, r"D:\CacheForge\src")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent / "src"))
 import server
 nz = server.normalizer
 

@@ -3,12 +3,14 @@
 import sys, os, threading, time, webbrowser, traceback, subprocess
 from pathlib import Path
 
-PROJECT_ROOT = Path(r"D:\IcyCache")
+PROJECT_ROOT = Path(__file__).resolve().parent
 LOG = PROJECT_ROOT / "logs" / "tray.log"
 LOG.parent.mkdir(parents=True, exist_ok=True)
 
-# Python Hermes venv (avec fastapi, uvicorn, etc.)
-HERMES_PYTHON = r"C:\Users\Tech\AppData\Local\hermes\installs\a65205c14fe510d7\environments\84a2ffad63d74ec3be33cf20c82a7b7d\venv\Scripts\pythonw.exe"
+# Interpreteur du projet (redemarrage du tray depuis le menu).
+# Priorite au venv du projet; sinon l'interpreteur courant.
+_VENV_PY = PROJECT_ROOT / "venv" / "Scripts" / ("pythonw.exe" if os.name == "nt" else "python")
+ICYCACHE_PYTHON = str(_VENV_PY) if _VENV_PY.exists() else sys.executable
 
 # CRITIQUE: sous pythonw.exe sys.stdout/stderr = None -> redirect AVANT tout import
 _logf = open(LOG, "a", encoding="utf-8", buffering=1)
@@ -26,6 +28,22 @@ def port_up(port):
         s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", port)) == 0
 
+
+def existing_service():
+    r"""Qui occupe deja le port 8080 ? -> (service, project_root) ou None.
+
+    Permet de distinguer une instance IcyCache deja lancee (on sort) d'une autre
+    version du projet (ex: l'ancien D:\CacheForge) qui squatte les ports.
+    """
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2) as r:
+            import json as _json
+            data = _json.loads(r.read().decode("utf-8", "replace"))
+            return data.get("service") or "inconnu", data.get("project_root") or ""
+    except Exception:
+        return None
+
 def run_uvicorn(app, host, port, name):
     import uvicorn
     try:
@@ -36,6 +54,21 @@ def run_uvicorn(app, host, port, name):
 
 def main():
     log("=== tray.py v2 start ===")
+    log(f"PROJECT_ROOT={PROJECT_ROOT}")
+    log(f"ICYCACHE_PYTHON={ICYCACHE_PYTHON}")
+
+    # Instance unique: si un IcyCache tourne deja, on ne demarre pas un second
+    # tray (sinon conflit de ports et double icone).
+    who = existing_service()
+    if who:
+        svc, root = who
+        if svc == "IcyCache" and str(PROJECT_ROOT).lower() == str(root).lower():
+            log(f"IcyCache deja actif sur 8080 ({root}) - rien a faire")
+            return
+        log(f"ALERT: le port 8080 est occupe par '{svc}' ({root or 'inconnu'}). "
+            f"Ce n'est pas cette instance ({PROJECT_ROOT}). Arret pour eviter un conflit.")
+        return
+
     try:
         from server import app as proxy_app, mcp
         log("server module importé OK")
@@ -49,6 +82,26 @@ def main():
         threading.Thread(target=run_uvicorn, args=(sse, "127.0.0.1", 8081, "MCP"), daemon=True).start()
     except Exception:
         log(f"MCP sse_app indisponible:\n{traceback.format_exc()}")
+
+    # Streamable HTTP: transport standard des clients MCP recents.
+    # SSE reste sur 8081 pour les clients legacy.
+    http_port = 8084
+    try:
+        import json as _json
+        cfg_path = PROJECT_ROOT / "config" / "icycache.json"
+        if cfg_path.exists():
+            with open(cfg_path, "r", encoding="utf-8") as fh:
+                _cfg = _json.load(fh)
+            http_port = int(_cfg.get("mcp_http", {}).get("port", 8084))
+    except Exception:
+        pass
+    try:
+        http_app = mcp.streamable_http_app()
+        threading.Thread(target=run_uvicorn, args=(http_app, "127.0.0.1", http_port, "MCP-HTTP"),
+                         daemon=True).start()
+        log(f"MCP streamable-http sur 127.0.0.1:{http_port}/mcp")
+    except Exception:
+        log(f"MCP streamable_http_app indisponible:\n{traceback.format_exc()}")
 
     for _ in range(30):
         if port_up(8080):
@@ -68,7 +121,7 @@ def main():
                 pystray.MenuItem("Dashboard", lambda i, it: webbrowser.open("http://localhost:8080/dashboard"), default=True),
                 pystray.MenuItem("Logs", lambda i, it: os.startfile(str(PROJECT_ROOT / "logs" / "app.log"))),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Restart", lambda i, it: (i.stop(), os.execv(HERMES_PYTHON, [HERMES_PYTHON, str(PROJECT_ROOT / "tray.py")]))),
+                pystray.MenuItem("Restart", lambda i, it: (i.stop(), os.execv(ICYCACHE_PYTHON, [ICYCACHE_PYTHON, str(PROJECT_ROOT / "tray.py")]))),
                 pystray.MenuItem("Stop", lambda i, it: (i.stop(), os._exit(0))),
             )
             icon = pystray.Icon("IcyCache", img, "IcyCache — Proxy :8080 | MCP :8081", menu)

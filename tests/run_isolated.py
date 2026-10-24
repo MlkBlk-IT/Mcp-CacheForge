@@ -2,8 +2,13 @@ r"""Tests isoles: DB temporaire + faux upstream (:8191) + proxy de test (:8190).
 Usage: venv\Scripts\python.exe tests\run_isolated.py"""
 import os, sys, subprocess, tempfile, time, sqlite3, socket
 
-ROOT = r"D:\CacheForge"
+# Racine derivee du fichier: le runner doit tester LE projet courant.
+# (Il pointait sur D:\CacheForge, l'ancien projet renomme: la suite validait
+#  du code obsolete et, sans les noms d'env historiques, la base de prod.)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = os.path.join(ROOT, "venv", "Scripts", "python.exe")
+if not os.path.exists(PY):
+    PY = sys.executable
 SP, UP = 8190, 8191
 
 
@@ -100,6 +105,10 @@ def main():
     dst.close()
     env = dict(os.environ, CACHEFORGE_DB=db, CACHEFORGE_LOG=log,
                CACHEFORGE_TARGET="http://127.0.0.1:%d/v1/chat/completions" % UP,
+               # Noms courants en priorite: garantissent l'isolation meme si
+               # la compatibilite CACHEFORGE_* disparait.
+               ICYCACHE_DB=db, ICYCACHE_LOG=log,
+               ICYCACHE_TARGET="http://127.0.0.1:%d/v1/chat/completions" % UP,
                CF_BASE="http://127.0.0.1:%d" % SP, CF_DB=db, CF_LOG=log,
                PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     procs, results = [], {}
