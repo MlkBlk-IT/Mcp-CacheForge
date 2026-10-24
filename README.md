@@ -1,265 +1,266 @@
-> ## ⚠️ WORK IN PROGRESS — migration en cours (2026-10-24)
-> IcyCache est renommé depuis CacheForge. La **gateway universelle multi-upstream** (`src/server_new.py`) est
-> écrite et testée, mais elle tourne **à côté** de `src/server.py` : le swap sur le port 8080 se fera
-> quand le dashboard sera finalisé, puis les deux Dendroits seront unifiés.
-> - `src/server.py` reste le service actif sur `:8080` / `:8081` / `:8084` (inchangé, il fait foi).
-> - La gateway est prête à démarrer seule : `python src/server_new.py --port 8090`.
-> - `src/server.py` et `static/dashboard.html` ne sont **pas** modifiés par la gateway.
+> ## ⚠️ NOTICE — The rest of this repository (code, comments, scripts, docs, commits, issues) is written in **French**. Only this README is in English.
+> ⚠️ WORK IN PROGRESS — migration in progress (2026-10-24)
+> IcyCache has been renamed from CacheForge. The **universal multi-upstream gateway** (`src/server_new.py`) is
+> written and tested, but it runs **alongside** `src/server.py`: the swap on port 8080 will happen
+> once the dashboard is finalized, then the two will be unified.
+> - `src/server.py` remains the active service on `:8080` / `:8081` / `:8084` (unchanged, authoritative).
+> - The gateway is ready to start on its own: `python src/server_new.py --port 8090`.
+> - `src/server.py` and `static/dashboard.html` are **not** modified by the gateway.
 >
-> ### Transports MCP disponibles (les trois sont actifs en même temps)
+> ### Available MCP transports (all three active at once)
 >
-> | Transport | Endpoint | Client cible |
-> |-----------|----------|--------------|
-> | **stdio** | `python src/server.py --mode mcp-stdio` | Claude Desktop, IDE, tout client stdio |
-> | **SSE** (legacy) | `http://127.0.0.1:8081/sse` | Hermes, clients anciens |
-> | **Streamable HTTP** (standard) | `http://127.0.0.1:8084/mcp` | Clients MCP récents, MCP Inspector |
+> | Transport | Endpoint | Target client |
+> |-----------|----------|---------------|
+> | **stdio** | `python src/server.py --mode mcp-stdio` | Claude Desktop, IDEs, any stdio client |
+> | **SSE** (legacy) | `http://127.0.0.1:8081/sse` | Hermes, older clients |
+> | **Streamable HTTP** (standard) | `http://127.0.0.1:8084/mcp` | Recent MCP clients, MCP Inspector |
 >
-> En stdio, passer par `src/mcp_stdio_bridge.py` : il réserve stdout au JSON-RPC.
-> (Le code ne écrit plus rien sur stdout, mais le pont reste la Filet de sécurité.)
+> In stdio mode, go through `src/mcp_stdio_bridge.py`: it reserves stdout for JSON-RPC.
+> (Nothing is written to stdout anymore, but the bridge remains the safety net.)
 
-# 🔥 IcyCache — Gateway LLM universelle avec cache local
+# 🔥 IcyCache — Universal LLM Gateway with local cache
 
-> **« Forger le cache, pas la réponse. »**
-> Passerelle HTTP qui s'intercale entre **n'importe quel client** et **n'importe quel upstream**
-> (local ou cloud), met en cache les réponses et les ressert **instantanément** — sans régénération CPU.
+> **"Forge the cache, not the answer."**
+> HTTP gateway that sits between **any client** and **any upstream** (local or cloud),
+> caches responses and serves them back **instantly** — no CPU regeneration.
 
 ---
 
-## Le problème
+## The problem
 
-| Problème | Conséquence |
-|----------|-------------|
-| **Latence** | Une requête identique rebrûle du temps CPU/RAM pour une réponse déjà calculée |
-| **Pas de cache sémantique** | Les systèmes standards hachent le prompt brut : `Explique Hyper-V` et `S'il te plaît, explique Hyper-V stp` génèrent **deux** requêtes distinctes |
-| **Pas d'observabilité** | Impossible de mesurer les tokens et le temps réellement économisés |
-| **Trafic qui contourne le proxy** | Chaque client qui parle directement à son fournisseur casse la promesse du cache |
+| Problem | Consequence |
+|---------|-------------|
+| **Latency** | An identical request burns CPU/RAM again for an already-computed answer |
+| **No semantic cache** | Standard systems hash the raw prompt: `Explain Hyper-V` and `Please explain Hyper-V thanks` generate **two** distinct requests |
+| **No observability** | Impossible to measure the tokens and time actually saved |
+| **Traffic bypassing the proxy** | Every client talking directly to its provider breaks the cache promise |
 
-IcyCache attaque les quatre : normalisation avant hachage, cache SQLite avec TTL, métriques exportables,
-et **une seule porte d'entrée** pour tout le trafic LLM.
+IcyCache attacks all four: normalization before hashing, SQLite cache with TTL, exportable metrics,
+and **a single entry point** for all LLM traffic.
 
 ---
 
-## Architecture cible
+## Target architecture
 
 ```
-   N'importe quel client                 (Hermes, Claude Code, scripts, IDE, SDK, CLI)
+   Any client                 (Hermes, Claude Code, scripts, IDE, SDK, CLI)
    base_url = http://127.0.0.1:8080
               │
               ▼
 ┌───────────────────────────────────────────────────────────────────────┐
 │  ICYCACHE GATEWAY  127.0.0.1:8080   (src/server_new.py)              │
 │                                                                       │
-│  ROUTAGE      préfixe d'URL  /<upstream>/v1/...                       │
+│  ROUTING      URL prefix  /<upstream>/v1/...                          │
 │               header      X-IcyCache-Upstream: lmstudio               │
 │               body        "upstream": "ollama"                        │
-│               défaut      gateway.default_upstream (config)           │
+│               default     gateway.default_upstream (config)           │
 │                                                                       │
-│  NORMALISATION NFKD → lowercase → Aho-Corasick → accents → ponctuation│
-│  CLÉ DE CACHE  SHA256 du payload NORMALISÉ (+ upstream + endpoint)    │
-│  DÉCISION      HIT → réponse instantanée | MISS → forward + save      │
-│  TOKENS        usage REEL de l'upstream. Jamais d'estimation.         │
-│  OBSERVABLE    WebSocket /ws/events : deltas live + final             │
-│  MCP (façade)  stats / clear / search / temps réel / tool-cache      │
+│  NORMALIZATION NFKD → lowercase → Aho-Corasick → accents → punctuation│
+│  CACHE KEY     SHA256 of the NORMALIZED payload (+ upstream + endpoint)│
+│  DECISION      HIT → instant response | MISS → forward + save         │
+│  TOKENS        REAL usage from the upstream. Never an estimate.       │
+│  OBSERVABLE    WebSocket /ws/events : live deltas + final             │
+│  MCP (facade)  stats / clear / search / realtime / tool-cache         │
 └───────────────────────────────────────────────────────────────────────┘
         │                    ▲                              │
-        ▼                    │ retour même chemin            │
+        ▼                    │ same path back                │
  { OmniRoute | LM Studio | Ollama | OpenAI | Anthropic | … }
         │
         ▼
-   SQLite db/cache.db   (events : upstream, tokens réels, latences, ttft)
+   SQLite db/cache.db   (events: upstream, real tokens, latencies, ttft)
 ```
 
-**Règle : tout ce qui sort d'un client et revient dans ce client passe par IcyCache.**
-OmniRoute n'est plus la porte d'entrée : c'est **un upstream parmi d'autres**.
+**Rule: everything that leaves a client and comes back to it goes through IcyCache.**
+OmniRoute is no longer the entry point: it is **one upstream among others**.
 
 ---
 
-## Composants
+## Components
 
-| Fichier | Rôle |
-|---------|------|
-| `src/server_new.py` | **Gateway universelle multi-upstream** (FastAPI) : routage, cache, tokens réels, WebSocket |
-| `src/mcp_gateway.py` | **Façade MCP** de la gateway : 7 outils, tool-cache, loop guard, API REST miroir |
-| `src/icy_core.py` | Noyau partagé : DB (`events`, `agent_events`, `tool_cache`), hub WebSocket, loop guard |
-| `src/icy_normalize.py` | Moteur de normalisation autonome (port fidèle, sans effet de bord à l'import) |
-| `src/icy_cache_store.py` | Store de cache LLM (compatible table `cache`, colonne `raw_hash` additive) |
-| `src/upstream_utils.py` | Normalisation d'usage, en-têtes, mutation cache_control / prompt_cache_key, meter SSE |
-| `src/mcp_stdio_bridge.py` | Pont stdio : réserve stdout au JSON-RPC MCP, logs et prints vers stderr |
-| `src/server.py` | Service historique (actif sur :8080/:8081) — **sera unifié avec la gateway** |
-| `config/icycache.gateway.json` | Config de la gateway : upstreams, cache, loop guard, tool cache |
-| `config/normalization_rules.json` | 1114 règles de normalisation |
-| `tools/smoke_gateway.py` | Test de fumée **réel** multi-upstream (ports isolés, DB temporaire) |
-| `tools/enforce_gateway.ps1` | Règles de pare-feu : rend le contournement impossible |
-| `tools/verify_enforcement.py` | **Preuve** : le client peut-il encore joindre un upstream en direct ? |
-| `tests/test_gateway.py` | 10 tests isolés (mock upstream, DB temporaire) |
+| File | Role |
+|------|------|
+| `src/server_new.py` | **Universal multi-upstream gateway** (FastAPI): routing, cache, real tokens, WebSocket |
+| `src/mcp_gateway.py` | **MCP facade** of the gateway: 7 tools, tool-cache, loop guard, mirror REST API |
+| `src/icy_core.py` | Shared core: DB (`events`, `agent_events`, `tool_cache`), WebSocket hub, loop guard |
+| `src/icy_normalize.py` | Standalone normalization engine (faithful port, no import side effects) |
+| `src/icy_cache_store.py` | LLM cache store (compatible `cache` table, additive `raw_hash` column) |
+| `src/upstream_utils.py` | Usage normalization, headers, cache_control/prompt_cache_key mutation, SSE meter |
+| `src/mcp_stdio_bridge.py` | stdio bridge: reserves stdout for MCP JSON-RPC, logs and prints to stderr |
+| `src/server.py` | Legacy service (active on :8080/:8081) — **will be unified with the gateway** |
+| `config/icycache.gateway.json` | Gateway config: upstreams, cache, loop guard, tool cache |
+| `config/normalization_rules.json` | 1114 normalization rules |
+| `tools/smoke_gateway.py` | **Real** multi-upstream smoke test (isolated ports, temp DB) |
+| `tools/enforce_gateway.ps1` | Firewall rules: makes bypass impossible |
+| `tools/verify_enforcement.py` | **Proof**: can the client still reach an upstream directly? |
+| `tests/test_gateway.py` | 10 isolated tests (mock upstream, temp DB) |
 
 ---
 
-## Routage : choisir son upstream
+## Routing: pick your upstream
 
-| Méthode | Exemple | Priorité |
-|---------|---------|----------|
-| Préfixe d'URL | `POST http://127.0.0.1:8080/lmstudio/v1/chat/completions` | 1 |
+| Method | Example | Priority |
+|--------|---------|----------|
+| URL prefix | `POST http://127.0.0.1:8080/lmstudio/v1/chat/completions` | 1 |
 | Header | `X-IcyCache-Upstream: lmstudio` | 2 |
-| Corps | `{"upstream": "lmstudio", ...}` | 3 |
-| Défaut de config | `gateway.default_upstream` | 4 |
+| Body | `{"upstream": "lmstudio", ...}` | 3 |
+| Config default | `gateway.default_upstream` | 4 |
 
-Aucun défaut **implicite** dans le code : sans source explicite, la requête est refusée en `400`
-avec la liste des upstreams disponibles. Un upstream inconnu est refusé en `404`.
-
----
-
-## Routes HTTP (gateway)
-
-| Route | Méthode | Rôle |
-|-------|---------|------|
-| `/v1/chat/completions` | POST | OpenAI-compatible (streaming et non-streaming) |
-| `/v1/messages` | POST | Anthropic natif (`kind: anthropic`) |
-| `/v1/embeddings` | POST | Embeddings (cachés) |
-| `/v1/models` | GET | Modèles de l'upstream |
-| `/{upstream}/v1/{rest}` | * | Routage explicite par préfixe |
-| `/ws/events` | WS | Événements temps réel : `delta` live + `final` (tokens réels) |
-| `/health`, `/api/status` | GET | Santé, upstreams joignables |
-| `/api/metrics`, `/api/metrics/series`, `/api/metrics/export` | GET | Métriques (formes dashboard) |
-| `/api/agent-events` | GET | Événements agent / tool-cache |
-| `/api/cache-clear` | POST | Vide le cache — header `X-IcyCache-Confirm: FORCE_DELETE` |
-| `/dashboard` | GET | Dashboard web (lecture seule) |
-
-**En-têtes de confirmation :** `X-IcyCache-Confirm` (naming unifié). L'ancien `X-CacheForge-Confirm`
-reste accepté par la gateway pour compatibilité.
+No **implicit** default in the code: without an explicit source, the request is rejected with
+`400` listing the available upstreams. An unknown upstream is rejected with `404`.
 
 ---
 
-## Tokens : la règle du réel
+## HTTP routes (gateway)
 
-| Source | Valeur |
-|--------|--------|
-| Champ `usage` de la réponse upstream | **always authoritative** |
-| Streaming OpenAI | `stream_options.include_usage=true` injecté → usage du dernier chunk |
-| Streaming Anthropic | `message_start` + `message_delta` |
-| Usage absent | `NULL` + `tokens_source: "n/a"` — **jamais d'estimation** |
-| HIT | `saved_prompt_tokens` / `saved_completion_tokens` = usage réel du 1er appel |
+| Route | Method | Role |
+|-------|--------|------|
+| `/v1/chat/completions` | POST | OpenAI-compatible (streaming and non-streaming) |
+| `/v1/messages` | POST | Native Anthropic (`kind: anthropic`) |
+| `/v1/embeddings` | POST | Embeddings (cached) |
+| `/v1/models` | GET | Upstream models |
+| `/{upstream}/v1/{rest}` | * | Explicit routing by prefix |
+| `/ws/events` | WS | Realtime events: live `delta` + `final` (real tokens) |
+| `/health`, `/api/status` | GET | Health, reachable upstreams |
+| `/api/metrics`, `/api/metrics/series`, `/api/metrics/export` | GET | Metrics (dashboard shapes) |
+| `/api/agent-events` | GET | Agent / tool-cache events |
+| `/api/cache-clear` | POST | Empty the cache — header `X-IcyCache-Confirm: FORCE_DELETE` |
+| `/dashboard` | GET | Web dashboard (read-only) |
 
-Colonnes `events` : `upstream`, `client`, `prompt_tokens`, `completion_tokens`, `cached_tokens`,
+**Confirmation headers:** `X-IcyCache-Confirm` (unified naming). The old `X-CacheForge-Confirm`
+is still accepted by the gateway for compatibility.
+
+---
+
+## Tokens: the rule of the real
+
+| Source | Value |
+|--------|-------|
+| `usage` field of the upstream response | **always authoritative** |
+| OpenAI streaming | `stream_options.include_usage=true` injected → usage from last chunk |
+| Anthropic streaming | `message_start` + `message_delta` |
+| Usage absent | `NULL` + `tokens_source: "n/a"` — **never an estimate** |
+| HIT | `saved_prompt_tokens` / `saved_completion_tokens` = real usage of the 1st call |
+
+`events` columns: `upstream`, `client`, `prompt_tokens`, `completion_tokens`, `cached_tokens`,
 `cache_write_tokens`, `latency_ms`, `ttft_ms`.
 
 ---
 
-## Outils MCP (façade)
+## MCP tools (facade)
 
-### Serveur historique (`src/server.py`) — 11 outils
+### Legacy server (`src/server.py`) — 11 tools
 
-| Outil | Rôle |
-|-------|------|
-| `get_cache_stats` | Entrées, hits, répartition par upstream/modèle |
-| `clear_cache` | Vide le cache (`confirm='FORCE_DELETE'`) |
-| `normalize_preview` | Aperçu de la normalisation + clé de cache |
-| `search_cached_prompts` | Recherche dans les prompts normalisés |
-| **`proxy_tool`** | **Appelle un outil d'un serveur MCP cible** (tool calling) |
-| **`proxy_tools`** | **Appel batch d'outils cibles** |
-| **`list_proxy_servers`** | **Serveurs MCP routables** |
-| **`list_proxy_tools`** | **Outils exposés par un serveur cible** |
-| `get_tool_cache_stats` | État du cache d'outils + événements agent |
-| `clear_tool_cache` | Vide le cache d'outils (`confirm='FORCE_DELETE'`) |
-| `check_tool_loop` | Détecte une boucle d'agent dans un historique LLM |
+| Tool | Role |
+|------|------|
+| `get_cache_stats` | Entries, hits, breakdown by upstream/model |
+| `clear_cache` | Empty the cache (`confirm='FORCE_DELETE'`) |
+| `normalize_preview` | Preview of normalization + cache key |
+| `search_cached_prompts` | Search in normalized prompts |
+| **`proxy_tool`** | **Call a tool on a target MCP server** (tool calling) |
+| **`proxy_tools`** | **Batch call of target tools** |
+| **`list_proxy_servers`** | **Routable MCP servers** |
+| **`list_proxy_tools`** | **Tools exposed by a target server** |
+| `get_tool_cache_stats` | Tool-cache state + agent events |
+| `clear_tool_cache` | Empty the tool cache (`confirm='FORCE_DELETE'`) |
+| `check_tool_loop` | Detect an agent loop in an LLM history |
 
-### Serveur gateway (`src/mcp_gateway.py`) — 11 outils
+### Gateway server (`src/mcp_gateway.py`) — 11 tools
 
-Les 7 outils d'observabilité (`get_cache_stats`, `clear_cache`, `normalize_preview`,
+The 7 observability tools (`get_cache_stats`, `clear_cache`, `normalize_preview`,
 `search_cached_prompts`, `get_realtime_tokens`, `list_upstreams`, `tool_cache_stats`)
-**plus** les 4 outils de relay (`proxy_tool`, `proxy_tools`, `list_proxy_servers`,
+**plus** the 4 relay tools (`proxy_tool`, `proxy_tools`, `list_proxy_servers`,
 `list_proxy_tools`).
 
-Le MCP est une **façade** : il observe et pilote. Il n'est pas dans le chemin des requêtes
-(un client MCP appelle volontairement ses outils — on ne peut pas intercepter un flux
-OpenAI/Anthropic avec lui). Le chemin des requêtes, c'est la gateway HTTP.
+MCP is a **facade**: it observes and drives. It is not in the request path
+(an MCP client calls its tools deliberately — you cannot intercept an
+OpenAI/Anthropic stream with it). The request path is the HTTP gateway.
 
-Boucles d'agent : `icy_core.llm_loop_check()` détecte un même outil rappelé avec les mêmes
-arguments **et** les mêmes résultats (formats Anthropic et OpenAI). Seuil : 3 répétitions = warning.
+Agent loops: `icy_core.llm_loop_check()` detects the same tool called again with the same
+arguments **and** the same results (Anthropic and OpenAI formats). Threshold: 3 repetitions = warning.
 
 ---
 
-## Tool calling : règles de sûreté
+## Tool calling: safety rules
 
-Le proxy d'outils (`src/tool_proxy.py`) relaie les appels vers les serveurs MCP cibles.
-Trois règles non négociables :
+The tool proxy (`src/tool_proxy.py`) relays calls to target MCP servers.
+Three non-negotiable rules:
 
-1. **Une erreur MCP n'est jamais mise en cache** et ne renvoie jamais `ok: true`.
-   Un `isError: true` devient `ok: false` avec le message réel (pas d'`ExceptionGroup` opaque).
-2. **Les outils d'écriture ne sont jamais mis en cache.** Rejouer une réponse en cache
-   doit être sans effet de bord ; sinon une écriture est sautée en silence.
-   - `cache_tools` présent → **allowlist stricte** (seuls les outils listés à `true` sont cachés).
-   - sinon `cache: true` → **heuristique anti-écriture** (`create_`, `write_`, `delete_`, `push_`, … exclus).
-   - sinon → pas de cache.
-3. **Les sessions MCP sont persistantes** (un processus par serveur, pas par appel).
-   Sans cela, chaque appel d'outil respawnait un processus : 21 s mesurés sur `npx`, 12 s sur `uvx`.
+1. **An MCP error is never cached** and never returns `ok: true`.
+   An `isError: true` becomes `ok: false` with the real message (no opaque `ExceptionGroup`).
+2. **Write tools are never cached.** Replaying a cached response
+   must have no side effect; otherwise a write is silently skipped.
+   - `cache_tools` present → **strict allowlist** (only tools listed as `true` are cached).
+   - otherwise `cache: true` → **anti-write heuristic** (`create_`, `write_`, `delete_`, `push_`, … excluded).
+   - otherwise → no cache.
+3. **MCP sessions are persistent** (one process per server, not per call).
+   Without this, every tool call respawned a process: 21s measured on `npx`, 12s on `uvx`.
 
-### Exemple
+### Example
 
 ```json
-// via n'importe quel client MCP
+// via any MCP client
 {"server": "github", "tool": "search_repositories", "args": {"query": "icycache"}}
 // -> {"ok": true, "cached": false, "latency_ms": 4867, "result": {...}}
 ```
 
-### Configuration des serveurs cibles
+### Target server configuration
 
-`config/icycache.json` → `tool_proxy.servers`. Deux jetons de portabilité :
+`config/icycache.json` → `tool_proxy.servers`. Two portability tokens:
 
-| Jeton | Valeur |
-|-------|--------|
-| `{PROJECT_ROOT}` | racine du projet (déplacer IcyCache ne demande aucune édition) |
-| `{PYTHON}` | interpréteur du venv du projet (seul à avoir `fastapi`/`mcp`) |
+| Token | Value |
+|-------|-------|
+| `{PROJECT_ROOT}` | project root (moving IcyCache needs no edit) |
+| `{PYTHON}` | project venv interpreter (the only one with `fastapi`/`mcp`) |
 
-Sous Windows, les commandes `.cmd` (comme `npx`) sont résolues automatiquement :
-`CreateProcess` ne lance pas un script `npx.cmd` sans shell.
+On Windows, `.cmd` commands (like `npx`) are resolved automatically:
+`CreateProcess` cannot launch an `npx.cmd` script without a shell.
 
 ---
 
-## Enforcement : rendre le contournement impossible
+## Enforcement: making bypass impossible
 
 ```powershell
-# 1. Installer les règles (PowerShell ELEVÉ)
+# 1. Install the rules (ELEVATED PowerShell)
 powershell -ExecutionPolicy Bypass -File tools\enforce_gateway.ps1 -Action apply `
     -TargetProgram "C:\Users\Tech\AppData\Local\hermes\hermes-agent\apps\desktop\release\win-unpacked\Hermes.exe" `
     -AllowPort 8080 -BlockPorts 20128,1234,11434
 
-# 2. La preuve : le client peut-il encore joindre un upstream en direct ?
+# 2. The proof: can the client still reach an upstream directly?
 python tools\verify_enforcement.py --program "D:\IcyCache\venv\Scripts\python.exe" --allow-port 8080
 ```
 
-Stratégie (Windows Firewall, par programme) : blocage des ports upstreams locaux **y compris sur
-127.0.0.1**, blocage de tout le trafic distant, autorisation explicite de `127.0.0.1:8080`.
-Le programme `verify_enforcement.py` s'exécute **avec le binaire du client** (les règles sont par
-programme) et contrôle que seul IcyCache reste joignable.
+Strategy (Windows Firewall, per program): block upstream local ports **including on
+127.0.0.1**, block all remote traffic, explicitly allow `127.0.0.1:8080`.
+The `verify_enforcement.py` program runs **with the client binary** (rules are per program)
+and checks that only IcyCache remains reachable.
 
 ---
 
-## Variables d'environnement (naming unifié)
+## Environment variables (unified naming)
 
-| Variable | Rôle | Ancien nom (toujours lu par `src/server.py` pour `ICYCACHE_*`) |
-|----------|------|------|
-| `ICYCACHE_DB` | Chemin de la DB de cache | `CACHEFORGE_DB` |
-| `ICYCACHE_LOG` | Chemin du log | `CACHEFORGE_LOG` |
-| `ICYCACHE_CONFIG` | Fichier de config (gateway) | — |
-| `ICYCACHE_TARGET` | Surcharge de l'upstream (tests isolés) | `CACHEFORGE_TARGET` |
-| `ICYCACHE_TOOLPROXY_CONFIG` | Config du proxy d'outils (défaut : `config/icycache.json`) | — |
+| Variable | Role | Old name (still read by `src/server.py` for `ICYCACHE_*`) |
+|----------|------|----------------------------------------------------------|
+| `ICYCACHE_DB` | Cache DB path | `CACHEFORGE_DB` |
+| `ICYCACHE_LOG` | Log path | `CACHEFORGE_LOG` |
+| `ICYCACHE_CONFIG` | Config file (gateway) | — |
+| `ICYCACHE_TARGET` | Upstream override (isolated tests) | `CACHEFORGE_TARGET` |
+| `ICYCACHE_TOOLPROXY_CONFIG` | Tool-proxy config (default: `config/icycache.json`) | — |
 
 ---
 
 ## Installation
 
 ```powershell
-# 1. Environnement (Python 3.12.10)
+# 1. Environment (Python 3.12.10)
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pip install websockets        # requis pour /ws/events
+pip install websockets        # required for /ws/events
 
-# 2. Démarrage manuel
+# 2. Manual start
 .\start_icycache.ps1
 
-# 3. Démarrage au login (Task Scheduler, ou repli Startup sans admin)
+# 3. Start at login (Task Scheduler, or Startup fallback without admin)
 .\install_autostart.ps1
 ```
 
@@ -268,25 +269,25 @@ pip install websockets        # requis pour /ws/events
 ## Tests
 
 ```powershell
-# Suite isolée (mock upstream, DB temporaire, aucun port occupé)
+# Isolated suite (mock upstream, temp DB, no port occupied)
 .\venv\Scripts\python.exe -m pytest tests\test_gateway.py -v
 
-# Suite d'intégration isolée (DB temporaire + faux upstream :8190/:8191)
+# Isolated integration suite (temp DB + fake upstream :8190/:8191)
 .\venv\Scripts\python.exe tests\run_isolated.py
 
-# Test offline du PrefixProxy (faux fournisseur, aucun appel externe)
+# Offline PrefixProxy test (fake provider, no external call)
 .\venv\Scripts\python.exe tests\test_prefix_proxy.py
 
-# Test de fumée réel (LM Studio / OmniRoute, port 8090, DB temporaire)
+# Real smoke test (LM Studio / OmniRoute, port 8090, temp DB)
 .\venv\Scripts\python.exe tools\smoke_gateway.py --port 8090
 ```
 
-Le test de fumée ne touche **ni** au service de production (`:8080`) **ni** au dashboard.
-`tests\run_isolated.py` utilise une **base temporaire** (`ICYCACHE_DB`) et ne touche jamais
-la base de production.
+The smoke test touches **neither** the production service (`:8080`) **nor** the dashboard.
+`tests\run_isolated.py` uses a **temporary** database (`ICYCACHE_DB`) and never touches
+the production database.
 
 ---
 
-## Licence
+## License
 
 MIT
