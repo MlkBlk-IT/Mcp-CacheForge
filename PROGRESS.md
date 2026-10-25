@@ -1,68 +1,225 @@
-# CacheForge — PROGRESS
+# IcyCache — PROGRESS
 
-Généré le 2026-10-22 à partir de : listing du dossier, logs (`logs/`), diffs des `src/server.py.bak*` (horodatés), `patch_20261022.py`, `config/cacheforge.json`.
-Rien n'a été exécuté pour produire ce fichier (lecture seule). Les points marqués **[non vérifié]** n'ont pas de preuve runtime.
+Généré le 2026-10-25 à partir du code source (`src/`), des configs (`config/`), de la suite de tests
+**exécutée localement**, de l'historique git et des documents internes (`README.md`, `UPDATE-NOTES.md`,
+`docs/CONFIGURATION.md`).
 
-## 1. Architecture (lu dans le code/config)
-- Proxy HTTP FastAPI `127.0.0.1:8080` -> upstream `http://localhost:1234/v1/chat/completions` (LM Studio), timeout 120 s
-- MCP `127.0.0.1:8081` (SSE) + `mcp_stdio.py` (wrapper stdio pour Claude Desktop, n'ouvre aucun port)
-- Cache SQLite `db/cache.db`, TTL 86400 s, max 10000 entrées, `enable_semantic: false`
-- Normaliseur : `config/normalization_rules.json` (1114 règles, générées 2026-10-21 22:35) via Aho-Corasick + stemmers NLTK
-- `tray.py` (icône systray, démarre proxy + MCP), scripts `install_autostart.ps1` / `uninstall_autostart.ps1` / `restart_tray.ps1` / `start_cacheforge.ps1`
-- `src/prefix_proxy.py` : proxy additif port 8090 (cache de préfixe Anthropic `cache_control`, OpenAI `prompt_cache_key`), stats `GET /api/prefix-stats`, DB séparée `db/prefix.db`
-- Dashboard `static/dashboard.html` + `/api/metrics`, `/api/metrics/export`, `/api/cache-clear` (exige header `X-CacheForge-Confirm`)
+Ce fichier remplace la version du 2026-10-22, qui décrivait le projet sous son ancien nom
+(**CacheForge**) et une configuration désormais obsolète.
 
-## 2. Chronologie reconstituée (horodatage des fichiers .bak)
-Un `.bak` = état de `server.py` avant l'édition suivante. Heures = mtime fichier.
+Convention de marquage :
+- **[mesuré]** — chiffre releuvé par exécution le 2026-10-25.
+- **[lu]** — déduit du code ou d'un document, sans exécution.
+- **[non vérifié]** — affirmation non confirmée par une source disponible.
 
-| Date/heure | Fichier | Taille | Changement vers la version suivante (diff) |
+---
+
+## 1. Identité
+
+| Champ | Valeur |
+|---|---|
+| Dépôt | https://github.com/MlkBlk-IT/icycache |
+| Renommage | `CacheForge` → `IcyCache` le 2026-10-23 (commit `af9ec4f`) |
+| Stack | FastAPI 0.156.6 + uvicorn 0.54.0, MCP 1.30.0, SQLite, FastMCP |
+| Python | 3.12.10, venv `D:\IcyCache\venv` |
+| Licence | MIT (`LICENSE`) |
+| Langue | code, docs et commits en **français** ; seul `README.md` est en anglais |
+| Point d'entrée | `src/server.py` (gateway) · `tray.py` (icône systray qui démarre tout) |
+
+## 2. Architecture
+
+### 2.1 Ports et processus [lu]
+
+| Port | Processus | Fichier | Rôle |
 |---|---|---|---|
-| 21/10 18:57 | `fix.log` | – | Install : venv Python 3.12.10, deps pinnées, DB, config, `start_cacheforge.ps1` |
-| 21/10 22:35 | `normalization_rules.json` | 125 KB | Règles générées (1114) |
-| 21/10 23:01–23:09 | bak, bak2, bak3, bak4 | 15323 B | Identiques entre eux (0 ligne de diff) |
-| 21/10 23:42 | bak5 | 15973 B | Clé de cache = sha256 d'un payload (model, system, messages user, temperature, tools) ; 400 si pas de message user |
-| 21/10 23:44 | bak6 | 16787 B | `stream` ajouté à la clé ; réponse HIT reformatée en `chat.completion` complet |
-| 21/10 23:46 | bak7 | 16916 B | Cache du `message` complet (JSON) au lieu du seul `content` |
-| 21/10 23:50 | bak8 | 17510 B | Bypass cache si `temperature != 0` (log `CACHE BYPASS`) |
-| 21/10 23:54 | bak9 | 16949 B | Outil MCP `set_target_provider` **supprimé** (raison inconnue) |
-| 22/10 00:00 | bak10 | 17478 B | Fix stream : `full_response`, `is_stream=True`, skip du cache si non déterministe |
-| 22/10 00:09 | bak11 | 21694 B | Rotation TTL + max_entries ; middleware token API `verify_api_token` ajouté |
-| 22/10 00:36 | bak12 | 21181 B | Middleware token API **retiré** ; `[DONE]` exclu de l'accumulation stream |
-| 22/10 00:51 | bak13 | 23363 B | Réécriture `NormalizationPipeline` (règles JSON). `dashboard.html.bak1` créé |
-| 22/10 01:12 | bak14 | 24483 B | Routes `/dashboard`, `/api/dashboard-stats`, `/api/cache-clear` ; `tray.py.bak1` à 01:07 |
-| 22/10 02:03 | bak15 | 22858 B | Pipeline NFKD -> lowercase -> Aho-Corasick -> strip accents -> cleanup |
-| 22/10 02:40 | bak16 | 24922 B | Version intermédiaire du normaliseur (retour à un état proche de bak14, fallback regex modifié) |
-| 22/10 02:57 | bak17 | 25925 B | `import time` global, usage/`gen_time_ms` sauvegardés (`_v: 2`), âge du cache, timezone UTC |
-| 22/10 03:01 | bak18 | 25948 B | Dashboard : `datetime(created_at,'localtime')` |
-| 22/10 03:14 | bak19 | 31616 B | Table `events` + `log_event`, `/api/metrics`. `dashboard.html.bak2` 03:15 |
-| 22/10 03:48 | `server.py` actuel | 37681 B | `patch_20261022.py` : env `CACHEFORGE_DB/LOG/TARGET`, normaliseur à frontières de mot (`_isw`), `generate_and_cache(client, response, t_fwd)`, `/api/metrics/export`, `cache-clear` protégé |
-| 22/10 03:47–04:28 | tests | – | `run_isolated.py`, `test_cacheforge_ext.py`, `test_prefix_proxy.py` (04:28) |
+| **8080** | Gateway HTTP | `src/server.py` | Point d'entrée unique de tout le trafic LLM |
+| **8081** | MCP SSE | `src/mcp_server.py` | Transport SSE (Hermes, clients legacy) |
+| **8082** | Config `gateway` | `config/icycache.gateway.json` | Port de référence de la gateway, utilisé pour l'URL WebSocket |
+| **8083** | MCP gateway | `src/mcp_gateway.py` | Façade MCP de la gateway |
+| **8084** | MCP Streamable HTTP | `src/mcp_server.py` (via `tray.py`) | Transport standard, surchargeable via `mcp_http.port` |
+| 8090 | Proxy de préfixe | `src/prefix_proxy.py` | Cache `cache_control` Anthropic / `prompt_cache_key` OpenAI |
 
-## 3. Bugs observés dans `tray.log` (et statut)
-- `HTTP 400` upstream LM Studio à 01:12 et 02:08 -> exception ASGI non gérée à l'époque ; aujourd'hui E1/E2 (400 relayé status+body) passent dans `isolated_run.log`
-- `UnboundLocalError: time` (`server.py` l.467/l.508) entre 02:20 et 02:48 ; plus d'occurrence après 02:57 (cohérent avec `import time` global dans bak17). **[non vérifié dans le code actuel]**
-- Normaliseur qui mutait des sous-chaînes (ex. "certificate authorityche", "quser interface") entre 02:08 et 03:26 ; corrigé par le patch (P3a/P3b/P3c PASS)
+`tray.py` démarre la gateway (8080) et le serveur MCP (8081 + 8084) dans un seul processus et refuse
+de démarrer si 8080 est déjà occupé par un autre service.
 
-## 3bis. Preuves runtime disponibles
-- `logs/isolated_run.log` : `test_cacheforge.py` ALL PASS, `test_cacheforge_ext.py` ALL PASS, ports libres après teardown, stub :8191 / proxy :8190 (DB et logs dans un dossier temp)
-- `logs/test_run.log` : run sur l'instance réelle, ALL PASS (METRICS : 38 req, 18 hits, hit rate 47.4 %, 31.0 % tokens économisés)
-- `logs/app.log` : dernière activité 09:03 (requêtes MCP `ListToolsRequest`), tray lancé 07:51
+### 2.2 Modules `src/` [lu]
 
-## 4. Non couvert / à valider
-- `test_prefix_proxy.py` (04:28) : **aucun log de résultat trouvé** ; `logs/prefix_proxy.log` existe mais n'a pas été lu **[non vérifié]**
-- `test_cacheforge.py` et `test_cacheforge_ext.py` n'incluent pas `test_prefix_proxy.py` dans `isolated_run.log`
-- `granite_live_test.py` / `logs/granite_live.log` : non lus
-- `CacheForge_Project_Documentation.docx` : non lu (peut être périmé vs code actuel)
-- `.git` : dépôt initialisé, `refs/heads` vide -> a priori aucun commit **[non vérifié, `git` non exécuté]**
-- `.gitignore` exclut `*.bak*` et `fix_*.py` : l'historique des bak ne serait pas versionné
+| Module | Rôle |
+|---|---|
+| `server.py` | **La gateway** — routage multi-upstream, normalisation, cache, tokens réels, WebSocket `/ws/events` |
+| `icy_core.py` | Noyau partagé (normalisation + store), lit la même config que la gateway |
+| `icy_normalize.py` | Normalisation autonome (NFKD → minuscules → Aho-Corasick → accents → ponctuation) |
+| `icy_cache_store.py` | Store de cache SQLite |
+| `mcp_server.py` | Couche MCP historique (SSE 8081 / Streamable HTTP 8084 / stdio) |
+| `mcp_gateway.py` | Façade MCP de la gateway |
+| `mcp_stdio_bridge.py` | Pont stdio |
+| `tool_proxy.py` | Proxy d'outils MCP avec cache par outil + garde anti-boucle |
+| `prefix_proxy.py` | Proxy additif de cache de préfixe (DB séparée `db/prefix.db`) |
+| `upstream_utils.py` | Helpers upstream |
 
-## 5. Incohérences constatées
-- `config/cacheforge.json` : `mcp.host = 0.0.0.0` alors que le tray démarre MCP en `127.0.0.1` (tray.log 07:51)
-- `config/cacheforge.json` : bloc `normalization.canonical_synonyms` (ancien système) probablement mort depuis `normalization_rules.json` **[non vérifié]**
-- `config/cacheforge.json.bak1` (00:09, 866 B) vs actuel (03:48, 868 B) : 2 octets d'écart, contenu non comparé
-- Chemins codés `D:\CacheForge` vs dossier `D:\CACHEFORGE` : OK sous Windows (insensible à la casse)
-- Middleware token API ajouté (bak11) puis retiré (bak12) : `proxy.api_token` n'est donc plus appliqué ; `0.0.0.0` côté MCP l'expose potentiellement sur le LAN si le tray n'écrase pas la valeur **[non vérifié]**
-- Outil MCP `set_target_provider` supprimé en bak9 : le changement de provider ne se fait plus que par édition de config
+### 2.3 Routage de la gateway [lu]
 
-## 6. Fichiers de travail (hors runtime)
-`fix_*.py`, `patch_*.py`, `audit_*.py`, `deploy_exhaustive.py`, `rewrite_normalizer.py`, `update_pipeline.py`, `show_*.py`, `find_*.py`, `add_debug_log.py`, `check_normalizer_class.py`, `generate_word_doc.py` : scripts one-shot de patch/diagnostic déjà exécutés, conservés tels quels.
+L'upstream se détermine, par ordre de priorité :
+1. préfixe d'URL `/<upstream>/v1/...`
+2. header `X-IcyCache-Upstream`
+3. champ `"upstream"` dans le body
+4. `gateway.default_upstream` de la config — **explicite, jamais de fallback code** : si absent, le
+   client doit nommer son upstream (erreur 400).
+
+`sticky_upstream: true` est activé : l'upstream retenu est mémorisé pour la session.
+
+## 3. Configuration effective [lu]
+
+Fichier lu par la gateway : `config/icycache.gateway.json` (surchargeable par la variable
+d'environnement `ICYCACHE_CONFIG`, que `server.py` ré-exporte pour `icy_core.py`).
+
+| Section | Valeurs |
+|---|---|
+| `proxy` | `127.0.0.1:8080` |
+| `mcp` | `127.0.0.1:8081` |
+| `mcp_gateway` | `127.0.0.1:8083` |
+| `gateway` | `127.0.0.1:8082`, `default_upstream: omniroute`, `ws_delta_interval_s: 0.25`, `sticky_upstream: true` |
+| `cache` | `db_path: D:\IcyCache\db\cache.db`, `max_entries: 50000`, `enable_semantic: false`, `semantic_threshold: 0.95`, `ttl_seconds: 604800` (7 j) |
+| `tool_cache` | `enabled: true`, `default: allow`, `max_result_bytes: 10485760` (10 Mio) — 12 serveurs descendants avec TTL par serveur |
+| `loop_guard` | `enabled: true`, `window_seconds: 300`, `warn_after: 3`, `block_after: 5` |
+| `normalization` | règles externes dans `config/normalization_rules.json` — **1111 règles** (1114 avant le commit `3794a93`) |
+| `logging` | `INFO`, `D:\IcyCache\logs\app.log`, rotation 10 Mio |
+
+### 3.1 Upstreams — 18 [lu]
+
+`omniroute` (défaut), `lmstudio`, `ollama`, `openai`, `anthropic`, `nvidia`, `groq`, `cerebras`,
+`openrouter`, `kilo`, `nous`, `copilot`, `ai-gateway`, `huggingface`, `google-aistudio`, `llm7io`,
+`mistral`, `cloudflare`.
+
+`google-aistudio` utilise le flag `strip_v1` (géré par `target_url()` dans `src/server.py`) car sa base
+se termine déjà par `/v1beta/openai`.
+
+### 3.2 ⚠️ Config morte à nettoyer [lu]
+
+`config/icycache.gateway.json` contient **deux blocs `cache`** :
+
+| Emplacement | `max_entries` | `enable_semantic` | `ttl_seconds` | Lu par le code ? |
+|---|---|---|---|---|
+| `cache` (racine) | 50000 | `false` | 604800 | **Oui** — `CACHE_CFG = CONFIG.get("cache", {})` (`src/server.py:82`) |
+| `gateway.cache` (imbriqué) | 200000 | `true` | 2592000 | **Non** — aucun lecteur de `gateway.cache` |
+
+Le bloc `gateway.cache` **ne fait rien** : c'est lui qui porte le seuil sémantique `0.80` et le TTL de
+30 jours, mais il n'est jamais lu. Le même décalage existe dans `config/icycache.json`
+(`max_entries: 200000`, `enable_semantic: true`, `ttl: 2592000`), fichier lu par `icy_core.py`,
+`mcp_server.py` et `tool_proxy.py` — mais dont le bloc `cache` racine n'est pas consommé par la gateway.
+
+**Conséquence : le cache sémantique annoncé dans le README est désactivé à l'exécution**
+(`enable_semantic: false` dans le bloc effectivement lu). À trancher : soit faire lire
+`gateway.cache`, soit supprimer le bloc imbriqué et aligner le README.
+
+## 4. État des tests — **ALL PASS** [mesuré]
+
+```
+cd D:\IcyCache
+venv\Scripts\python.exe tests\run_isolated.py
+```
+
+→ `EXIT test_cacheforge.py=0` · `EXIT test_cacheforge_ext.py=0` · `ISOLATED: ALL PASS` ·
+`PORTS LIBRES apres teardown: True`
+
+Le runner monte un **faux upstream** sur `:8191` et un proxy de test sur `:8190`, avec une base
+temporaire : ni la DB de prod ni LM Studio ne sont touchés.
+
+### 4.1 Ce qui est couvert
+
+| Suite | Assertions | Résultat |
+|---|---|---|
+| `test_cacheforge.py` | métriques, hit rate, dashboard, events | ALL PASS |
+| `test_cacheforge_ext.py` | erreurs 400 relayées, TTL/peremption, `finish_reason`, `tool_calls`, SSE, stream interrompu, export, `cache-clear` protégé, normalisation (P3a/P3b/P3c) | ALL PASS |
+| Normalisation | 1010 règles testées, aucune mutation de sous-chaîne | ALL PASS |
+
+### 4.2 Ce qui n'est **pas** couvert [lu]
+
+| Fichier | Statut |
+|---|---|
+| `tests/test_gateway.py` | **Hors runner** — jamais exécuté par `run_isolated.py` |
+| `tests/test_prefix_proxy.py` | **Hors runner** — jamais exécuté |
+| `tests/granite_live_test.py` | Test live (upstream réel), exclu volontairement |
+| `tests/run_isolated.py` | Ne boucle que sur `test_cacheforge.py` et `test_cacheforge_ext.py` |
+
+Un `pytest` direct **échoue** : `tests/test_cacheforge.py` appelle `sys.exit()` si `CF_BASE` est
+absent (« Lancer via tests\run_isolated.py »). Le passage par le runner est obligatoire.
+
+## 5. Chronologie depuis le 2026-10-22 [lu]
+
+| Commit | Date | Sujet |
+|---|---|---|
+| `d676b7f` | 2026-10-22 | Fix exposition MCP + doc à jour |
+| `f6c5bc6` | 2026-10-23 | Dashboard : nœuds vivants, jauge électrique, palette cyberpunk |
+| `af9ec4f` | 2026-10-23 | Rebrand CacheForge → IcyCache |
+| `7c25dee` | 2026-10-23 | Ajout de `glama.json` (auto-découverte) |
+| `d837da8` | 2026-10-24 | Gateway universelle + modules IcyCache + refonte dashboard |
+| `f662705` | 2026-10-24 | README traduit en anglais + bandeau d'avertissement |
+| `e9d3a13` | 2026-10-24 | Guide de configuration complet + rangement archive + captures dashboard |
+| `0957112` | 2026-10-24 | chore : `.gitignore` élargi, artefacts de build retirés du suivi |
+| `2933a8f` | 2026-10-25 | Sync sync |
+| `3794a93` | 2026-10-25 | feat : gateway multi-upstream, cache sémantique, entrypoint de warm-up |
+
+### 5.1 Contenu de `3794a93` (dernier push)
+
+- **Gateway** : `sticky_upstream` activé ; 13 nouveaux upstreams.
+- **Tool cache** : `default` passé de `deny` à `allow`, `max_result_bytes` de 1 Mio à 10 Mio ;
+  12 serveurs descendants enregistrés avec une policy de TTL par serveur.
+- **Cache** : `max_entries` 200000, `enable_semantic` `true` (seuil 0.80), TTL 30 j — **dans le bloc
+  `gateway.cache`, non lu** (voir §3.2) ; `window_seconds` du tool cache 300 → 1800.
+- **Serveur** : support du flag `strip_v1` dans `target_url()` ; `/health` expose désormais `service`
+  et `project_root`.
+- **Normalisation** : suppression de 3 règles trop larges (`right`, `cd`, `so`) — 1114 → 1111 règles.
+- **Nouveaux fichiers** : `entrypoint.sh` (serveur + warm-up en arrière-plan) et
+  `warmup_cache.py` ( amorce le cache depuis les prompts système/template d'Hermes).
+- **Chore** : `scratch/` ajouté au `.gitignore` (copies isolées, DB, logs, captures).
+
+## 6. Écarts entre le README et le code [lu]
+
+| Sujet | README | Code réel |
+|---|---|---|
+| Nombre d'upstreams | « 5 upstreams » (bandeau du 2026-10-24) | **18** |
+| Cache sémantique | présenté comme actif | `enable_semantic: false` dans le bloc lu (§3.2) |
+| Ports | « gateway 8080, SSE 8081, HTTP 8084 » | conforme, mais `mcp_gateway` (8083) et `gateway` (8082) ne sont pas documentés |
+| `entrypoint.sh`, `warmup_cache.py` | non mentionnés | présents depuis `3794a93` |
+
+## 7. Sécurité et secrets [lu]
+
+- Aucune clé en clair dans le dépôt : `api_key` est `null`, et les secrets sont référencés par
+  `@hermes:mcp_servers.<nom>` (résolus à l'exécution par le mécanisme de secrets d'Hermes).
+- Scan de secrets passé sur les 8 fichiers modifiés + ajoutés : aucune fuite.
+- **Chemins absolus codés en dur** dans les configs et les scripts : `D:\IcyCache\db\cache.db`,
+  `D:\IcyCache\logs\app.log`, `D:\IcyCache\prompts.txt`,
+  `C:\Users\Tech\AppData\Local\hermes\config.yaml` (`warmup_cache.py`),
+  `D:/Loom/.venv/Scripts/loom-mcp.exe` (downstream du tool cache).
+  → Le repo est public : ces chemins sont des informations propres à une machine locale, pas des
+  secrets, mais ils rendent le projet non portable tel quel.
+- `tool_cache.default` est passé à `allow` : tout outil exposé est désormais cachable par défaut.
+  `max_result_bytes` passe à 10 Mio — à surveiller côté mémoire.
+
+## 8. Points de vigilance
+
+1. **`gateway.cache` n'est pas lu** (§3.2) : le cache sémantique est inactif à l'exécution malgré
+   l'annonce du commit et du README.
+2. **`tests/test_gateway.py` et `tests/test_prefix_proxy.py` ne sont jamais exécutés** — la gateway,
+   qui est le cœur du projet, n'est pas couverte par la suite verte.
+3. `pytest` direct est cassé (`SystemExit` sans `CF_BASE`) : seule la commande `run_isolated.py` est
+   fonctionnelle.
+4. Chemins absolus et noms d'utilisateur codés en dur dans les fichiers versionnés.
+5. `scratch/` contient une copie isolée complète de l'application (DB de 4,7 Mo, logs, captures
+   `.bak`) — désormais ignoré par git, mais il reste présent sur le disque.
+6. `CacheForge_Project_Documentation.docx` (40 Ko) est antérieur au rebrand et au gateway ;
+   `start_cacheforge.ps1` et `start_icycache.ps1` coexistent.
+
+## 9. Prochaines étapes proposées
+
+1. Trancher le sort du bloc `gateway.cache` : soit le faire lire par `server.py` (cache sémantique
+   réellement actif), soit le supprimer et corriger le README.
+2. Intégrer `test_gateway.py` et `test_prefix_proxy.py` au runner isolé — la gateway doit être
+   couverte par la suite verte, pas seulement la couche historique.
+3. Rendre le runner utilisable via `pytest` (gestion propre de `CF_BASE`) ou documenter la commande
+   unique dans le README.
+4. Externaliser les chemins absolus (variables d'environnement ou chemins relatifs au `PROJECT_ROOT`),
+   notamment dans `warmup_cache.py` et `config/icycache.gateway.json`.
+5. Régénérer ou retirer `CacheForge_Project_Documentation.docx` et le script `start_cacheforge.ps1`.
+6. Documenter les ports 8082 / 8083 dans le README.
