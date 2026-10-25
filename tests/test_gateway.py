@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests isoles de la gateway IcyCache (src/server_new.py).
+"""Tests isoles de la gateway IcyCache (src/server.py).
 
 Aucune dependance aux services externes : un faux upstream OpenAI-compatible est
 lance sur un port libre, la gateway sur un autre port, avec une base SQLite
@@ -169,15 +169,15 @@ def stack():
 
     os.environ["ICYCACHE_CONFIG"] = str(cfg_path)
     os.environ["ICYCACHE_DB"] = str(db_path)
-    for mod in ("server_new", "icy_core", "icy_cache_store", "icy_normalize", "upstream_utils"):
+    for mod in ("server", "icy_core", "icy_cache_store", "icy_normalize", "upstream_utils"):
         sys.modules.pop(mod, None)
     sys.path.insert(0, str(SRC))
-    import server_new  # noqa: E402
+    import server  # noqa: E402
 
-    _serve(server_new.app, gw_port)
+    _serve(server.app, gw_port)
 
     yield {"gw": gw_base, "mock": mock_base, "db": db_path, "cfg": cfg_path,
-           "app": server_new.app, "state": MOCK_STATE}
+           "app": server.app, "state": MOCK_STATE}
 
     for srv in servers:
         srv.should_exit = True
@@ -188,8 +188,8 @@ def clean_cache(stack):
     stack["state"]["calls"] = 0
     stack["state"]["chat_calls"] = 0
     stack["state"]["embed_calls"] = 0
-    import server_new
-    server_new.CACHE.clear()
+    import server
+    server.CACHE.clear()
     yield
 
 
@@ -215,8 +215,8 @@ def test_missing_upstream_is_explicit(stack):
     stack["cfg"].write_text(json.dumps(cfg), encoding="utf-8")
     try:
         import importlib
-        import server_new
-        importlib.reload(server_new)
+        import server
+        importlib.reload(server)
         with httpx.Client(timeout=10) as c:
             r = c.post(stack["gw"] + "/v1/chat/completions",
                        json={"model": "m", "messages": [{"role": "user", "content": "hi"}]})
@@ -229,8 +229,8 @@ def test_missing_upstream_is_explicit(stack):
         cfg["gateway"]["default_upstream"] = "mock"
         stack["cfg"].write_text(json.dumps(cfg), encoding="utf-8")
         import importlib
-        import server_new
-        importlib.reload(server_new)
+        import server
+        importlib.reload(server)
 
 
 def test_unknown_upstream_404(stack):

@@ -1,813 +1,716 @@
 #!/usr/bin/env python3
 """
-IcyCache - MCP Bi-Directionnel avec Cache Sémantique/Exact
-Proxy HTTP + MCP Server (dual transport: stdio + SSE)
+IcyCache - Gateway universel multi-upstream.
+
+Point d'entree unique : http://127.0.0.1:8080
+Tout client dont base_url pointe sur IcyCache passe par ici (Hermes, Claude Code,
+scripts, IDE, SDK...). L'upstream de sortie est choisi EXPLICITEMENT :
+prefixe d'URL, header X-IcyCache-Upstream, champ "upstream" du body, ou defaut de config.
+Aucun defaut implicite vers OmniRoute : OmniRoute est UN upstream parmi d'autres.
+
+Endpoints LLM (caches, tokens 100% upstream) :
+  POST /v1/chat/completions     OpenAI-compatible
+  POST /v1/messages             Anthropic natif
+  POST /v1/embeddings           embeddings
+  GET  /v1/models
+  ANY  /{upstream}/v1/{rest}    routage explicite par prefixe
+
+Observabilite :
+  GET  /ws/events               WebSocket : deltas live + evenement final (tokens reels)
+  GET  /health /api/status /api/metrics /api/metrics/series /api/metrics/export
+  GET  /api/dashboard-stats /dashboard
+
+Ce module NE touche PAS a static/dashboard.html ni a src/mcp_server.py : la gateway
+tourne a cote, sur des ports isoles, jusqu'a unification explicite.
 """
+from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
-import json
-import sqlite3
-import logging
 import socket
 import sys
 import time
-from pathlib import Path
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, AsyncGenerator
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, FileResponse, Response
-import httpx
-import uvicorn
-from mcp.server.fastmcp import FastMCP
-from tqdm import tqdm
-
-# === CONFIGURATION ===
-# Racine du projet derivee du fichier: le code doit fonctionner quel que soit
-# l'emplacement du dossier (D:\IcyCache, un clone, un chemin reseau, Linux...).
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_FILE = PROJECT_ROOT / "config" / "icycache.json"
-# Les noms historiques CACHEFORGE_* restent acceptes (compatibilite annoncee
-# dans le README): sans cela, les harnais d'isolation anciens ecrivaient dans
-# la base de production au lieu de leur base temporaire.
-DB_FILE = Path(os.environ.get("ICYCACHE_DB") or os.environ.get("CACHEFORGE_DB")
-               or (PROJECT_ROOT / "db" / "cache.db"))
-LOG_FILE = Path(os.environ.get("ICYCACHE_LOG") or os.environ.get("CACHEFORGE_LOG")
-                or (PROJECT_ROOT / "logs" / "app.log"))
 
-# Chargement de la configuration
-with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-    CONFIG = json.load(f)
-_TARGET = os.environ.get("ICYCACHE_TARGET") or os.environ.get("CACHEFORGE_TARGET")
-if _TARGET:  # tests isoles: upstream factice
-    CONFIG['proxy']['target_provider'] = _TARGET
+# La config de la gateway doit etre lue par icy_core aussi (meme fichier).
+_CONFIG_FILE = Path(os.environ.get("ICYCACHE_CONFIG") or (PROJECT_ROOT / "config" / "icycache.gateway.json"))
+os.environ["ICYCACHE_CONFIG"] = str(_CONFIG_FILE)
 
-# Configuration du logging — JAMAIS sur stdout.
-# Le transport stdio MCP utilise stdout pour JSON-RPC: ecrire des logs dedans corrompt
-# le protocole et tue la connexion. stderr + fichier seulement. De plus on force l'UTF-8
-# avec errors='replace': sous Windows la console est cp1252 et un caractere '✓' fait
-# planter le processus avec UnicodeEncodeError.
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        if _stream is not None and (_stream.encoding or "").lower().replace("-", "") != "utf8":
-            _stream.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
-logging.basicConfig(
-    level=getattr(logging, CONFIG['logging']['level']),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),
-        logging.StreamHandler(sys.stderr),
-    ]
-)
-logger = logging.getLogger("IcyCache")
-
-# === PROXY D'OUTILS (tool cache + garde anti-boucle) ===
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-try:
-    import tool_proxy as tp
-    TOOL_PROXY_OK = True
-    logger.info("tool_proxy charge: %s serveur(s) routable(s)", len(tp.server_names()))
-except Exception:
-    tp = None
-    TOOL_PROXY_OK = False
-    logger.warning("tool_proxy INDISPONIBLE: %s", __import__("traceback").format_exc())
 
-# === MOTEUR DE NORMALISATION PAR PIPELINE (RIGOUREUX & RAPIDE) ===
-class NormalizationPipeline:
-    """Pipeline de normalisation multi-couches pour maximiser le cache hit rate"""
-    
-    def __init__(self, rules_path: Path):
-        with open(rules_path, 'r', encoding='utf-8') as f:
-            self.config = json.load(f)
-        
-        # Couche 1: Aho-Corasick pour remplacement multi-patterns
-        try:
-            import ahocorasick
-            self.automaton = ahocorasick.Automaton()
-            for rule in self.config['rules']:
-                pattern = rule['pattern'].lower()
-                replacement = rule['replace']
-                self.automaton.add_word(pattern, (pattern, replacement))
-            self.automaton.make_automaton()
-            logger.info("Aho-Corasick chargé: %s patterns", len(self.config['rules']))
-        except ImportError:
-            logger.warning("ahocorasick non disponible, fallback regex")
-            self.automaton = None
-            self.regex_compiled = []
-            for rule in self.config['rules']:
-                pattern = re.compile(r'\b' + re.escape(rule['pattern'].lower()) + r'\b', re.IGNORECASE)
-                self.regex_compiled.append((pattern, rule['replace']))
-        
-        # Couche 2: Stemmers Snowball
-        try:
-            from nltk.stem.snowball import SnowballStemmer
-            self.stemmer_fr = SnowballStemmer('french')
-            self.stemmer_en = SnowballStemmer('english')
-            logger.info("Stemmers NLTK chargés")
-        except ImportError:
-            logger.warning("nltk non disponible, stemming désactivé")
-            self.stemmer_fr = None
-            self.stemmer_en = None
-        
-        # Couche 3: NFKD normalization
-        import unicodedata
-        self.unicodedata = unicodedata
-        
-        # Regex pour nettoyage final
-        self.cleanup_regex = re.compile(r'[^\w\s]', re.UNICODE)
-        self.space_regex = re.compile(r'\s+')
-    
-    def normalize(self, text: str) -> str:
-        """Pipeline complet: NFKD → Lowercase → Aho-Corasick → Strip accents → Stemming → Cleanup"""
-        
-        # Étape 1: NFKD normalization (normalise les caractères Unicode)
-        text = self.unicodedata.normalize('NFKD', text)
-        
-        # Étape 2: Lowercase
-        text = text.lower()
-        
-        # Étape 3: Aho-Corasick ou Regex pour remplacement multi-patterns
-        if self.automaton:
-            # Aho-Corasick: remplacement optimal
-            def _isw(c):
-                return c.isalnum() or c == '_' or self.unicodedata.category(c) == 'Mn'
-            cands = []
-            for end_idx, (pattern, replacement) in self.automaton.iter(text):
-                s, e = end_idx - len(pattern) + 1, end_idx + 1
-                if s > 0 and _isw(pattern[0]) and _isw(text[s - 1]):
-                    continue
-                if e < len(text) and _isw(pattern[-1]) and _isw(text[e]):
-                    continue
-                cands.append((s, e, replacement))
-            # leftmost-longest, sans chevauchement
-            cands.sort(key=lambda t: (t[0], -(t[1] - t[0])))
-            out, pos = [], 0
-            for s, e, rep in cands:
-                if s < pos:
-                    continue
-                out.append(text[pos:s])
-                out.append(rep)
-                pos = e
-            out.append(text[pos:])
-            text = ''.join(out)
-        else:
-            # Fallback regex
-            for pattern, replacement in self.regex_compiled:
-                text = pattern.sub(replacement, text)
-        
-        # Étape 4: Strip accents (garde seulement les caractères de base)
-        text = ''.join(
-            c for c in self.unicodedata.normalize('NFD', text)
-            if self.unicodedata.category(c) != 'Mn'
-        )
-        
-        # Étape 5: Stemming (optionnel, peut être trop agressif)
-        # Désactivé pour l'instant car peut casser la sémantique
-        # if self.stemmer_fr:
-        #     words = text.split()
-        #     # Détection simple de langue
-        #     if any(word in ['le', 'la', 'les', 'un', 'une', 'des'] for word in words):
-        #         text = ' '.join(self.stemmer_fr.stem(w) for w in words)
-        #     else:
-        #         text = ' '.join(self.stemmer_en.stem(w) for w in words)
-        
-        # Étape 6: Cleanup final (supprime ponctuation, normalise espaces)
-        text = self.cleanup_regex.sub('', text)
-        text = self.space_regex.sub(' ', text).strip()
-        
-        return text
-    
-    def get_hash(self, normalized_text: str) -> str:
-        """Génère le hash SHA256 du texte normalisé"""
-        return hashlib.sha256(normalized_text.encode('utf-8')).hexdigest()
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi.responses import (  # noqa: E402
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
+import httpx  # noqa: E402
+import uvicorn  # noqa: E402
 
+import icy_core  # noqa: E402
+from icy_core import hub, log_event, utc_iso  # noqa: E402
+import upstream_utils  # noqa: E402
+from upstream_utils import StreamMeter, mutate, usage_from  # noqa: E402
+from icy_cache_store import CacheStore, decode_entry, encode_entry  # noqa: E402
+import icy_normalize  # noqa: E402
+from icy_normalize import cache_key, normalize_payload  # noqa: E402
+import logging  # noqa: E402
 
-class CacheManager:
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
-        self._init_db()
-    
-    def _init_db(self):
-        """Initialise les tables si nécessaire"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Les tables sont déjà créées par le script d'installation
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in cursor.fetchall()]
-        conn.close()
-        
-        if 'cache' not in tables:
-            raise RuntimeError("Base de données non initialisée. Exécuter 2-FIX_IcyCache.ps1")
-    
-    def get(self, prompt_hash: str) -> Optional[Dict[str, Any]]:
-        """Récupère une entrée du cache"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT normalized_prompt, original_prompt, response, is_stream, 
-                   provider, model, created_at, access_count
-            FROM cache 
-            WHERE prompt_hash = ? AND created_at >= datetime('now', '-' || ? || ' seconds')
-        """, (prompt_hash, CONFIG.get('cache', {}).get('ttl_seconds', 86400)))
-        
-        row = cursor.fetchone()
-        
-        if row:
-            # Mise à jour du compteur d'accès
-            cursor.execute("""
-                UPDATE cache 
-                SET access_count = access_count + 1, last_accessed = CURRENT_TIMESTAMP
-                WHERE prompt_hash = ?
-            """, (prompt_hash,))
-            conn.commit()
-            
-            conn.close()
-            return {
-                'normalized_prompt': row[0],
-                'original_prompt': row[1],
-                'response': row[2],
-                'is_stream': bool(row[3]),
-                'provider': row[4],
-                'model': row[5],
-                'created_at': row[6],
-                'access_count': row[7] + 1
-            }
-        
-        conn.close()
-        return None
-    
-    def set(self, prompt_hash: str, normalized: str, original: str, 
-            response: str, is_stream: bool, provider: str = None, model: str = None):
-        """Stocke une entrée dans le cache"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO cache 
-            (prompt_hash, normalized_prompt, original_prompt, response, is_stream, 
-             provider, model, created_at, last_accessed, access_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)
-        """, (prompt_hash, normalized, original, response, is_stream, provider, model))
-        
-        conn.commit()
-        
+_log = logging.getLogger("IcyCache.gateway")
 
-        # FIX: Rotation du cache (TTL + max_entries)
-        ttl = CONFIG.get('cache', {}).get('ttl_seconds', 86400)
-        max_entries = CONFIG.get('cache', {}).get('max_entries', 10000)
-        
-        # Supprimer les entrées expirées
-        cursor.execute("DELETE FROM cache WHERE created_at < datetime('now', '-' || ? || ' seconds')", (ttl,))
-        
-        # Si on dépasse max_entries, supprimer les plus anciennes
-        count = cursor.execute("SELECT COUNT(*) FROM cache").fetchone()[0]
-        if count >= max_entries:
-            excess = count - max_entries + 1
-            cursor.execute("DELETE FROM cache WHERE prompt_hash IN (SELECT prompt_hash FROM cache ORDER BY last_accessed ASC LIMIT ?)", (excess,))
-            logger.info(f"CACHE ROTATION: Supprimé {excess} entrées anciennes")
-        conn.commit()
-        logger.info(f"CACHE SAVE: {prompt_hash[:8]}... (provider={provider}, model={model})")
-        conn.close()
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Retourne les statistiques du cache"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM cache")
-        total = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COALESCE(SUM(access_count - 1), 0) FROM cache")  # access_count démarre à 1 à l'insertion
-        total_hits = cursor.fetchone()[0] or 0
-        
-        cursor.execute("""
-            SELECT provider, COUNT(*) as count 
-            FROM cache 
-            GROUP BY provider
-        """)
-        by_provider = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        conn.close()
-        
-        return {
-            'total_entries': total,
-            'total_hits': total_hits,
-            'by_provider': by_provider,
-            'db_path': str(self.db_path)
-        }
-    
-    def clear(self):
-        """Vide complètement le cache"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM cache")
-        conn.commit()
-        conn.close()
-        logger.warning("CACHE CLEARED")
+CONFIG: Dict[str, Any] = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+DB_FILE = Path(os.environ.get("ICYCACHE_DB") or CONFIG.get("cache", {}).get("db_path")
+               or (PROJECT_ROOT / "db" / "cache.db"))
+DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-# === INITIALISATION DES COMPOSANTS ===
-normalizer = NormalizationPipeline(PROJECT_ROOT / 'config' / 'normalization_rules.json')
-cache = CacheManager(DB_FILE)
+UPSTREAMS: Dict[str, Dict[str, Any]] = CONFIG.get("upstreams", {})
+GW = CONFIG.get("gateway", {})
+DEFAULT_UPSTREAM: Optional[str] = GW.get("default_upstream")
+PROXY_CFG = CONFIG.get("proxy", {})
+TIMEOUT = float(PROXY_CFG.get("timeout", 120))
+CACHE_CFG = CONFIG.get("cache", {})
+CACHE_UNSET_TEMPERATURE = bool(CACHE_CFG.get("cache_when_temperature_unset", True))
+WS_DELTA_INTERVAL = float(GW.get("ws_delta_interval_s", 0.25))
 
-def _init_events():
-    conn = sqlite3.connect(DB_FILE)
-    conn.execute("""CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT CURRENT_TIMESTAMP,
-        kind TEXT NOT NULL, hash TEXT, model_req TEXT, model_real TEXT, stream INTEGER,
-        prompt_tokens INTEGER, completion_tokens INTEGER,
-        saved_prompt INTEGER DEFAULT 0, saved_completion INTEGER DEFAULT 0,
-        latency_ms INTEGER, ttft_ms INTEGER)""")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_hash ON events(hash, kind)")
-    conn.commit(); conn.close()
-_init_events()
-
-def log_event(kind, h, model_req, model_real, stream, pt=None, ct=None,
-              sp=0, sc=0, latency_ms=None, ttft_ms=None):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        conn.execute("INSERT INTO events (kind,hash,model_req,model_real,stream,prompt_tokens,"
-                     "completion_tokens,saved_prompt,saved_completion,latency_ms,ttft_ms) "
-                     "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                     (kind, h, model_req, model_real, int(bool(stream)), pt, ct, sp, sc, latency_ms, ttft_ms))
-        conn.commit(); conn.close()
-    except Exception:
-        logger.exception("events insert failed")
-
-def original_usage(h):
-    conn = sqlite3.connect(DB_FILE)
-    row = conn.execute("SELECT prompt_tokens, completion_tokens, model_real FROM events "
-                       "WHERE hash=? AND kind='MISS' ORDER BY id DESC LIMIT 1", (h,)).fetchone()
-    conn.close()
-    return row
-
-# === MCP SERVER ===
-# Bind explicite depuis la config: mcp.run(transport='sse') seul ignorerait
-# host/port (defaut SDK 127.0.0.1:8000) et exposerait le port sur le LAN.
-mcp = FastMCP(
-    "IcyCache",
-    host=CONFIG['mcp'].get('host', '127.0.0.1'),
-    port=CONFIG['mcp'].get('port', 8081),
+CACHE = CacheStore(
+    DB_FILE,
+    ttl_seconds=int(CACHE_CFG.get("ttl_seconds", 86400)),
+    max_entries=int(CACHE_CFG.get("max_entries", 10000)),
 )
 
-@mcp.tool()
-def get_cache_stats() -> Dict[str, Any]:
-    """Retourne les statistiques du cache"""
-    return cache.get_stats()
+CLIENT_HEADER = "x-icycache-client"
 
-@mcp.tool()
-def clear_cache(confirm: str) -> str:
-    """Vide le cache (nécessite confirm='FORCE_DELETE')"""
-    if confirm != "FORCE_DELETE":
-        return "ÉCHEC: Utilisez confirm='FORCE_DELETE' pour valider la suppression destructive."
-    
-    cache.clear()
-    return "SUCCÈS: Cache entièrement vidé."
 
-@mcp.tool()
-def normalize_preview(text: str) -> Dict[str, str]:
-    """Prévisualise la normalisation d'un prompt"""
-    normalized = normalizer.normalize(text)
+# =============================================================================
+# ROUTAGE
+# =============================================================================
+def _upstream_names() -> list:
+    return sorted(UPSTREAMS.keys())
+
+
+def resolve_upstream(request: Request, body: Optional[Dict[str, Any]] = None,
+                     prefix: Optional[str] = None) -> Tuple[str, str]:
+    """(nom_upstream, source) - jamais de defaut implicite si default_upstream absent."""
+    if prefix:
+        return _validate(prefix, "path")
+    hdr = request.headers.get("x-icycache-upstream")
+    if hdr:
+        return _validate(hdr.strip().lower(), "header")
+    if isinstance(body, dict):
+        val = body.get("upstream")
+        if isinstance(val, str) and val.strip():
+            return _validate(val.strip().lower(), "body")
+    if DEFAULT_UPSTREAM:
+        return _validate(DEFAULT_UPSTREAM, "default")
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "error": "upstream_required",
+            "message": ("Aucun upstream indique. Precisez l'upstream par prefixe d'URL "
+                        "(/omniroute/v1/chat/completions), par le header X-IcyCache-Upstream, "
+                        "par le champ \"upstream\" du body, ou par gateway.default_upstream dans la config."),
+            "available_upstreams": _upstream_names(),
+        },
+    )
+
+
+def _validate(name: str, source: str) -> Tuple[str, str]:
+    key = (name or "").strip().lower()
+    if key not in UPSTREAMS:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "unknown_upstream", "upstream": key, "source": source,
+                    "available_upstreams": _upstream_names()},
+        )
+    return key, source
+
+
+def target_url(upstream: str, path: str) -> str:
+    """Assemble base_url + chemin sans dupliquer /v1."""
+    base = str(UPSTREAMS[upstream].get("base_url", "")).rstrip("/")
+    if not base:
+        raise HTTPException(status_code=500, detail={"error": "upstream_misconfigured", "upstream": upstream})
+    if base.endswith("/v1") and path.startswith("/v1"):
+        path = path[3:] or "/"
+    return base + path
+
+
+def upstream_kind(upstream: str) -> str:
+    return str(UPSTREAMS[upstream].get("kind", "openai")).lower()
+
+
+def forward_headers(request: Request, upstream: str, kind: str) -> Dict[str, str]:
+    """Passe les credentials du client tels quels. Aucune cle API stockee cote IcyCache."""
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    for name in upstream_utils.FWD_HEADERS:
+        val = request.headers.get(name)
+        if val:
+            headers[name] = val
+    if "authorization" not in {k.lower() for k in headers} and "x-api-key" not in {k.lower() for k in headers}:
+        env_name = UPSTREAMS[upstream].get("api_key_env")
+        if env_name:
+            token = os.environ.get(env_name)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+    if kind == "anthropic" and "anthropic-version" not in {k.lower() for k in headers}:
+        headers["anthropic-version"] = request.headers.get("anthropic-version", "2023-06-01")
+    for k, v in (UPSTREAMS[upstream].get("headers") or {}).items():
+        headers[k] = v
+    headers.pop("host", None)
+    return headers
+
+
+def client_label(request: Request) -> str:
+    lab = request.headers.get(CLIENT_HEADER)
+    if lab:
+        return lab[:64]
+    ua = request.headers.get("user-agent")
+    if ua:
+        return ua[:64]
+    return "unknown"
+
+
+# =============================================================================
+# CACHE : CLE SUR PAYLOAD NORMALISE
+# =============================================================================
+def cacheable_reason(body: Dict[str, Any]) -> Tuple[bool, str]:
+    """(cacheable, raison). Refus explicite plutot qu'un silence."""
+    if not isinstance(body, dict):
+        return False, "body invalide"
+    temp = body.get("temperature", None)
+    if temp is None:
+        if CACHE_UNSET_TEMPERATURE:
+            return True, "temperature absent (cacheable par config)"
+        return False, "temperature absent (non cacheable par config)"
+    try:
+        if float(temp) == 0.0:
+            return True, "temperature=0"
+    except (TypeError, ValueError):
+        return False, "temperature illisible"
+    return False, f"temperature={temp} (non deterministe)"
+
+
+def build_cache_key(body: Dict[str, Any], upstream: str, path: str) -> Tuple[str, str]:
+    scope = {"upstream": upstream, "path": path}
+    key = cache_key(body, scope)
+    raw = hashlib.sha256(icy_normalize.canonical(
+        {k: v for k, v in (body or {}).items() if k not in icy_normalize.CACHE_KEY_IGNORED}
+    ).encode("utf-8")).hexdigest()
+    return key, raw
+
+
+def display_prompt(body: Dict[str, Any]) -> str:
+    msgs = body.get("messages") or []
+    for m in reversed(msgs):
+        if isinstance(m, dict) and m.get("role") == "user":
+            c = m.get("content")
+            if isinstance(c, str):
+                return c
+            if isinstance(c, list):
+                return " ".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
+    if isinstance(body.get("system"), str):
+        return body["system"]
+    return ""
+
+
+# =============================================================================
+# CONVERSIONS SSE <-> JSON
+# =============================================================================
+def sse_to_message(sse_text: str) -> Tuple[Optional[dict], Optional[str], Optional[str]]:
+    """(message, model, finish_reason) a partir d'un flux SSE OpenAI-compatible."""
+    content_parts: list = []
+    tool_calls: Dict[int, dict] = {}
+    model = None
+    finish = None
+    for raw_line in sse_text.split("\n"):
+        line = raw_line.strip()
+        if not line.startswith("data:") or line.startswith("data: [DONE]"):
+            continue
+        try:
+            chunk = json.loads(line[5:].strip())
+        except Exception:
+            continue
+        model = chunk.get("model") or model
+        for ch in (chunk.get("choices") or []):
+            delta = ch.get("delta") or {}
+            if delta.get("content"):
+                content_parts.append(delta["content"])
+            for tc in (delta.get("tool_calls") or []):
+                slot = tool_calls.setdefault(tc.get("index", 0), {"id": None, "type": "function",
+                                                                 "function": {"name": "", "arguments": ""}})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["function"]["name"] += fn["name"]
+                if fn.get("arguments"):
+                    slot["function"]["arguments"] += fn["arguments"]
+            if ch.get("finish_reason"):
+                finish = ch["finish_reason"]
+    msg: Dict[str, Any] = {"role": "assistant", "content": "".join(content_parts) if content_parts else None}
+    if tool_calls:
+        msg["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
+    return msg, model, finish
+
+
+def message_to_sse(message: dict, model: Optional[str], finish: str = "stop") -> str:
+    delta: Dict[str, Any] = {"role": "assistant"}
+    if message.get("content"):
+        delta["content"] = message["content"]
+    if message.get("tool_calls"):
+        delta["tool_calls"] = [{"index": i, **tc} for i, tc in enumerate(message["tool_calls"])]
+    chunk = {"id": "chatcmpl-cache-" + uuid.uuid4().hex[:8], "object": "chat.completion.chunk",
+             "created": int(time.time()), "model": model or "unknown",
+             "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+    return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\ndata: [DONE]\n\n"
+
+
+def openai_usage(u: Dict[str, Any]) -> Dict[str, Any]:
+    pt = u.get("prompt_tokens")
+    ct = u.get("completion_tokens")
+    out = {"prompt_tokens": pt, "completion_tokens": ct}
+    if pt is not None or ct is not None:
+        out["total_tokens"] = (pt or 0) + (ct or 0)
+    return out
+
+
+def anthropic_usage(u: Dict[str, Any]) -> Dict[str, Any]:
+    """Usage au format Anthropic natif (a partir de l'usage brut de l'upstream)."""
     return {
-        'original': text,
-        'normalized': normalized,
-        'hash': normalizer.get_hash(normalized)
+        "input_tokens": u.get("input_tokens"),
+        "output_tokens": u.get("output_tokens"),
+        "cache_read_input_tokens": u.get("cache_read_input_tokens") or 0,
+        "cache_creation_input_tokens": u.get("cache_creation_input_tokens") or 0,
     }
 
 
-@mcp.tool()
-def search_cached_prompts(query: str, limit: int = 10) -> list:
-    """Recherche dans les prompts normalisés du cache"""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT prompt_hash, normalized_prompt, provider, model, created_at, access_count
-        FROM cache
-        WHERE normalized_prompt LIKE ?
-        ORDER BY access_count DESC
-        LIMIT ?
-    """, (f'%{query}%', limit))
-    
-    results = []
-    for row in cursor.fetchall():
-        results.append({
-            'hash': row[0][:8] + '...',
-            'normalized': row[1],
-            'provider': row[2],
-            'model': row[3],
-            'created_at': row[4],
-            'access_count': row[5]
-        })
-    
-    conn.close()
-    return results
+def anthropic_usage_from_norm(norm: Dict[str, Any]) -> Dict[str, Any]:
+    """Usage Anthropic reconstruit depuis la forme normalisee (cache hit)."""
+    return {
+        "input_tokens": norm.get("prompt_tokens"),
+        "output_tokens": norm.get("completion_tokens"),
+        "cache_read_input_tokens": norm.get("cached_tokens") or 0,
+        "cache_creation_input_tokens": norm.get("cache_write_tokens") or 0,
+    }
 
 
-# === OUTILS DU PROXY D'OUTILS MCP (tool cache + garde anti-boucle) ===
-
-@mcp.tool()
-async def proxy_tool(server: str, tool: str, args: dict = None, client: str = "hermes") -> dict:
-    """Appelle un outil MCP via le proxy IcyCache (cache + garde anti-boucle).
-
-    Routage: Hermes -> IcyCache -> serveur MCP cible (stdio) -> resultat.
-    Cache: cle = hash(serveur, outil, args). Une reponse en cache est renvoyee telle
-    quelle, sans re-executer l'outil (latence ~0, economie = saved_latency_ms).
-    Boucle: meme outil + memes args + memes resultats => bloque par ToolLoopGuard.
-
-    Args:
-        server: nom du serveur (voir list_proxy_servers)
-        tool: nom de l'outil a executer
-        args: arguments de l'outil (dict JSON), optionnel
-        client: identifiant de l'appelant (session agent), optionnel
-
-    Returns:
-        {"ok": true, "cached": false, "latency_ms": 12, "result": ...}
-        {"ok": true, "cached": true, "latency_ms": 0, "saved_latency_ms": 840, "result": ...}
-    """
-    if not TOOL_PROXY_OK:
-        return {"ok": False, "error": "tool_proxy indisponible (voir logs/app.log)"}
-    return await tp.call_tool(server, tool, args, client)
+def build_openai_response(message: Optional[dict], model: Optional[str], finish: str,
+                          usage: Dict[str, Any], cached: bool = False, extra: Optional[dict] = None) -> dict:
+    out = {
+        "id": "chatcmpl-" + uuid.uuid4().hex[:12],
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model or "unknown",
+        "choices": [{"index": 0, "message": message or {"role": "assistant", "content": ""},
+                     "finish_reason": finish}],
+        "usage": usage,
+    }
+    if extra:
+        out.update(extra)
+    return out
 
 
-@mcp.tool()
-async def proxy_tools(calls: list, client: str = "hermes") -> list:
-    """Appel batch de plusieurs outils MCP via le proxy IcyCache.
-
-    Args:
-        calls: liste de [{"server": "..", "tool": "..", "args": {...}}, ...]
-        client: identifiant de l'appelant, optionnel
-
-    Returns:
-        liste des resultats dans le meme ordre (format identique a proxy_tool)
-    """
-    if not TOOL_PROXY_OK:
-        return [{"ok": False, "error": "tool_proxy indisponible"}]
-    return await tp.batch_call(calls or [], client)
-
-
-@mcp.tool()
-def list_proxy_servers() -> dict:
-    """Liste les serveurs MCP routables via le proxy IcyCache."""
-    if not TOOL_PROXY_OK:
-        return {"ok": False, "error": "tool_proxy indisponible"}
-    names = tp.server_names()
-    return {"ok": True, "servers": names, "count": len(names)}
+def build_anthropic_response(message: Optional[dict], model: Optional[str], stop: str,
+                              usage: Dict[str, Any], extra: Optional[dict] = None) -> dict:
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}]
+    if not content:
+        content = []
+    out = {
+        "id": "msg_" + uuid.uuid4().hex[:16],
+        "type": "message",
+        "role": "assistant",
+        "model": model or "unknown",
+        "content": content,
+        "stop_reason": stop or "end_turn",
+        "stop_sequence": None,
+        "usage": usage,
+    }
+    if extra:
+        out.update(extra)
+    return out
 
 
-@mcp.tool()
-async def list_proxy_tools(server: str) -> dict:
-    """Liste les outils exposes par un serveur MCP cible (ex: 'github', 'fetch').
-
-    Args:
-        server: nom du serveur (voir list_proxy_servers)
-    """
-    if not TOOL_PROXY_OK:
-        return {"ok": False, "error": "tool_proxy indisponible"}
-    return await tp.list_server_tools(server)
+# =============================================================================
+# APPLICATION
+# =============================================================================
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    hub.bind(asyncio.get_running_loop())
+    icy_core.init_db()
+    yield
 
 
-@mcp.tool()
-def get_tool_cache_stats() -> dict:
-    """Statistiques du cache d'outils (tool_cache) et des evenements (agent_events)."""
-    if not TOOL_PROXY_OK:
-        return {"ok": False, "error": "tool_proxy indisponible"}
-    return tp.stats()
+app = FastAPI(title="IcyCache Gateway", version="2.0.0", lifespan=lifespan)
 
 
-@mcp.tool()
-def clear_tool_cache(confirm: str) -> dict:
-    """Vide le cache d'outils (necessite confirm='FORCE_DELETE')."""
-    if not TOOL_PROXY_OK:
-        return {"ok": False, "error": "tool_proxy indisponible"}
-    if confirm != "FORCE_DELETE":
-        return {"ok": False, "error": "ECHEC: utilisez confirm='FORCE_DELETE' pour valider."}
-    return tp.clear_cache()
+def _cache_age(created_at: Optional[str]) -> Optional[int]:
+    if not created_at:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            dt = datetime.strptime(str(created_at).split(".")[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            return int((datetime.now(timezone.utc) - dt).total_seconds())
+        except Exception:
+            continue
+    return None
 
 
-@mcp.tool()
-async def check_tool_loop(messages: list, warn_after: int = 3, max_cycle: int = 3) -> dict:
-    """Detecte une boucle d'agent dans l'historique de messages (appels d'outils repetee).
-
-    Args:
-        messages: historique de messages (format OpenAI)
-        warn_after: seuil d'alerte (defaut 3)
-        max_cycle: longueur maximale du cycle detecte (defaut 3)
-
-    Returns:
-        {"ok": true, "loop": false} ou {"ok": true, "loop": true, "warning": {...}}
-    """
-    if not TOOL_PROXY_OK:
-        return {"ok": False, "error": "tool_proxy indisponible"}
-    hit = tp.llm_messages_guard(messages, warn_after=warn_after, max_cycle=max_cycle)
-    if hit:
-        return {"ok": True, "loop": True, "warning": hit}
-    return {"ok": True, "loop": False}
-
-# === PROXY HTTP ===
-app = FastAPI(title="IcyCache Proxy", version="1.0.0")
-
-# === STATIC FILES (dashboard assets: three.min.js, icywebgl.js, refs) ===
-try:
-    from fastapi.staticfiles import StaticFiles
-    _static_dir = PROJECT_ROOT / "static"
-    if _static_dir.exists():
-        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
-except Exception as _e:
-    logging.warning(f"static mount failed: {_e}")
-
-# Serve js/assets at root too (dashboard.html references them relatively)
-# Cache-Control: no-store — ces fichiers sont edites en place pendant le
-# developpement ; sans cet en-tete, le navigateur garde l'ancienne version en
-# cache et les correctifs JS n'apparaissent jamais.
-_ASSET_HEADERS = {"Cache-Control": "no-store, must-revalidate"}
-
-@app.get("/three.min.js")
-async def _three():
-    return FileResponse(str(PROJECT_ROOT / "static" / "three.min.js"),
-                        media_type="application/javascript", headers=_ASSET_HEADERS)
-
-@app.get("/icywebgl.js")
-async def _icywebgl():
-    return FileResponse(str(PROJECT_ROOT / "static" / "icywebgl.js"),
-                        media_type="application/javascript", headers=_ASSET_HEADERS)
-
-@app.get("/{asset}.png")
-async def _png(asset: str):
-    p = PROJECT_ROOT / "static" / f"{asset}.png"
-    if p.exists():
-        return FileResponse(str(p), media_type="image/png", headers=_ASSET_HEADERS)
-    raise HTTPException(status_code=404)
-
-# Champs sans effet sur la sortie. Tout le reste entre dans la clé de cache.
-CACHE_KEY_IGNORED = {"stream", "stream_options", "user"}
-
+async def _read_body(request: Request) -> Optional[Dict[str, Any]]:
+    raw = await request.body()
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 @app.post("/v1/chat/completions")
-async def proxy_chat(request: Request):
-    """Proxy HTTP avec interception bi-directionnelle"""
-    t0 = time.perf_counter()
+@app.post("/v1/messages")
+@app.post("/v1/embeddings")
+async def llm_endpoint(request: Request, api: str = None):
+    """Point d'entree LLM unifie. Le dispatch se fait sur le chemin reel."""
+    path = request.url.path
+    return await handle_llm(request, path)
+
+
+@app.api_route("/{upstream}/v1/{rest:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def prefixed_endpoint(upstream: str, rest: str, request: Request):
+    """Routage explicite par prefixe : /omniroute/v1/chat/completions."""
+    return await handle_llm(request, "/v1/" + rest, prefix=upstream)
+
+
+async def handle_llm(request: Request, path: str, prefix: Optional[str] = None):
+    body = await _read_body(request)
+    if body is None and request.method != "GET":
+        raise HTTPException(status_code=400, detail={"error": "invalid_json",
+                                                     "message": "Body JSON invalide ou absent."})
+    body = body or {}
+    upstream, source = resolve_upstream(request, body, prefix)
+    kind = upstream_kind(upstream)
+
+    if path.startswith("/v1/messages"):
+        want_kind = "anthropic"
+    elif path.startswith("/v1/embeddings") or path.startswith("/v1/models"):
+        want_kind = "openai"
+    else:
+        want_kind = "openai"
+    if kind != want_kind and not UPSTREAMS[upstream].get("allow_cross_kind"):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "protocol_mismatch",
+                    "message": (f"L'upstream '{upstream}' parle le protocole '{kind}' mais ce chemin "
+                                f"attend '{want_kind}'. Utilisez le chemin correspondant ou un autre upstream."),
+                    "available_upstreams": _upstream_names()},
+        )
+
+    if path.startswith("/v1/models") and request.method == "GET":
+        return await proxy_models(request, upstream)
+
+    return await run_llm(request, body, path, upstream, kind, source)
+
+
+async def proxy_models(request: Request, upstream: str):
+    """Liste des modeles de l'upstream (cache 60s)."""
+    url = target_url(upstream, "/v1/models")
     try:
-        body = await request.json()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
-    
-    # Extraction et construction du payload de cache complet (évite faux positifs)
-    messages = body.get('messages', [])
-    if not any(m.get('role') == 'user' for m in messages):
-        raise HTTPException(status_code=400, detail="No user message found")
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url, headers=forward_headers(request, upstream, upstream_kind(upstream)))
+        if resp.status_code >= 400:
+            return Response(content=resp.content, status_code=resp.status_code,
+                            media_type=resp.headers.get("content-type", "application/json"))
+        return Response(content=resp.content, media_type="application/json",
+                        headers={"X-IcyCache-Upstream": upstream})
+    except httpx.RequestError as exc:
+        return JSONResponse({"error": {"message": f"upstream unreachable: {exc}", "type": "upstream_error"}},
+                            status_code=502)
 
-    # GARDE ANTI-BOUcle (LLM): detecte les repetitions d'appels d'outils dans l'historique.
-    # Ne bloque pas la requete: injecte un message system qui casse la boucle.
-    if TOOL_PROXY_OK:
-        try:
-            _loop = tp.llm_messages_guard(messages)
-            if _loop:
-                _warn = _loop.get("warning", _loop) if isinstance(_loop, dict) else _loop
-                logger.warning("LOOP GUARD: %s", _warn)
-                messages = list(messages) + [{
-                    "role": "system",
-                    "content": ("[IcyCache] Boucle detectee: " + str(_warn) +
-                                " Variez les arguments ou arretez d'appeler cet outil."),
-                }]
-                body["messages"] = messages
-        except Exception:
-            logger.exception("llm_messages_guard")
 
-    cache_payload = {k: v for k, v in body.items() if k not in CACHE_KEY_IGNORED}
-    
-    # Normalisation du dernier message user (pour logs/display)
-    user_prompt = next((m['content'] for m in reversed(messages) if m['role'] == 'user'), '')
-    # FIX: Gérer le contenu multimodal (vision) — content peut être une liste
-    if isinstance(user_prompt, list):
-        # Extraire le texte des blocs textuels
-        text_parts = [item.get('text', '') for item in user_prompt if item.get('type') == 'text']
-        user_prompt_text = ' '.join(text_parts)
+async def run_llm(request: Request, body: Dict[str, Any], path: str, upstream: str, kind: str, source: str):
+    t0 = time.perf_counter()
+    req_id = uuid.uuid4().hex[:12]
+    lab = client_label(request)
+    is_stream = bool(body.get("stream"))
+
+    # --- loop guard LLM (historique de tool calls identiques + resultats identiques) ---
+    _lg = CONFIG.get("loop_guard") or {}
+    if _lg.get("enabled", True) and isinstance(body.get("messages"), list):
+        _llm = _lg.get("llm") or {}
+        _loop = icy_core.llm_loop_check(body["messages"], warn_after=int(_llm.get("warn_after", 3)))
+        if _loop:
+            icy_core.log_agent_event("llm_loop", client=lab, detail=_loop)
+            if _llm.get("action") == "block" and _loop["reps"] >= int(_llm.get("block_after", 6)):
+                return JSONResponse({"error": {"type": "loop_detected", "loop": _loop,
+                                               "message": "Boucle d'agent detectee (memes tool calls + memes resultats)."}},
+                                    status_code=429)
+
+    # --- D2 : injection cache_control / prompt_cache_key selon l'upstream ---
+    out_body = json.loads(json.dumps(body))  # copie profonde (le body original n'est pas touche)
+    out_body.pop("upstream", None)
+    injected = mutate(kind, upstream, out_body)
+
+    cacheable, cache_reason = cacheable_reason(out_body)
+    ckey, raw_hash = build_cache_key(out_body, upstream, path)
+    is_chat = path.startswith("/v1/chat/completions") or path.startswith("/v1/messages")
+    is_embed = path.startswith("/v1/embeddings")
+
+    # --- HIT ---
+    if cacheable and (is_chat or is_embed):
+        hit = CACHE.get(ckey)
+        if hit:
+            return serve_hit(hit, body, path, upstream, kind, ckey, raw_hash, t0, lab, req_id)
+
+    # --- MISS ---
+    url = target_url(upstream, path)
+    headers = forward_headers(request, upstream, kind)
+    if is_stream and kind == "openai":
+        out_body["stream_options"] = {**(out_body.get("stream_options") or {}), "include_usage": True}
+
+    if is_stream:
+        return await forward_stream(req_id, url, headers, out_body, upstream, kind, ckey, raw_hash,
+                                    cacheable, cache_reason, t0, lab, path, is_chat, is_embed, injected)
+    return await forward_json(req_id, url, headers, out_body, upstream, kind, ckey, raw_hash,
+                              cacheable, cache_reason, t0, lab, path, is_chat, is_embed, injected)
+
+
+def serve_hit(hit: Dict[str, Any], body: Dict[str, Any], path: str, upstream: str, kind: str,
+              ckey: str, raw_hash: str, t0: float, lab: str, req_id: str) -> Response:
+    """Reponse depuis le cache : tokens sauvegardes = usage reel du premier appel."""
+    entry = decode_entry(hit["response"])
+    usage = entry.get("usage") or {}
+    pt = usage.get("prompt_tokens")
+    ct = usage.get("completion_tokens")
+    model = entry.get("model") or hit.get("model")
+    finish = entry.get("finish_reason") or "stop"
+    latency_ms = int((time.perf_counter() - t0) * 1000)
+
+    if kind == "anthropic":
+        sp = usage.get("prompt_tokens")
+        sc = usage.get("completion_tokens")
+        log_event("HIT", ckey, body.get("model"), model, bool(body.get("stream")),
+                  sp=sp, sc=sc, latency_ms=latency_ms, upstream=upstream, client=lab,
+                  cached_tokens=usage.get("cached_tokens"), req_id=req_id)
+        if body.get("stream"):
+            return _replay_anthropic_stream(entry, model, finish, usage)
+        return JSONResponse(build_anthropic_response(
+            entry.get("message"), model, finish, anthropic_usage_from_norm(usage),
+            extra={"cached": True, "cache_hash": ckey[:8],
+                   "saved_prompt_tokens": sp, "saved_completion_tokens": sc,
+                   "cache_age_seconds": _cache_age(hit.get("created_at")),
+                   "hit_count": hit.get("access_count", 1),
+                   "original_usage": anthropic_usage_from_norm(usage)}))
+
+    sp = pt or 0
+    sc = ct or 0
+    log_event("HIT", ckey, body.get("model"), model, bool(body.get("stream")),
+              sp=sp, sc=sc, latency_ms=latency_ms, upstream=upstream, client=lab,
+              cached_tokens=usage.get("cached_tokens"), req_id=req_id)
+
+    if body.get("stream"):
+        sse = entry.get("sse")
+        if not sse:
+            sse = message_to_sse(entry.get("message") or {}, model, finish)
+        return StreamingResponse(_sse_iter(sse), media_type="text/event-stream",
+                                 headers={"X-IcyCache-Upstream": upstream, "X-IcyCache-Hit": "1"})
+
+    return JSONResponse(build_openai_response(
+        entry.get("message"), model, finish,
+        {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        extra={"cached": True, "cache_hash": ckey[:8],
+               "saved_prompt_tokens": sp, "saved_completion_tokens": sc,
+               "saved_total_tokens": sp + sc,
+               "original_gen_time_ms": entry.get("gen_time_ms"),
+               "cache_age_seconds": _cache_age(hit.get("created_at")),
+               "hit_count": hit.get("access_count", 1),
+               "original_usage": usage}),
+        headers={"X-IcyCache-Upstream": upstream, "X-IcyCache-Hit": "1"})
+
+
+async def _sse_iter(text: str):
+    """Rejoue un flux SSE stocke tel quel (separateurs \\n\\n preserves)."""
+    if not text:
+        return
+    for block in text.split("\n\n"):
+        block = block.strip("\n")
+        if block:
+            yield block + "\n\n"
+    if "[DONE]" not in text:
+        yield "data: [DONE]\n\n"
+
+
+def _replay_anthropic_stream(entry: Dict[str, Any], model: Optional[str], finish: str,
+                              usage: Dict[str, Any]) -> Response:
+    sse = entry.get("sse")
+    if not sse:
+        msg = entry.get("message") or {}
+        content = msg.get("content") if isinstance(msg, dict) else ""
+        blocks = [{"type": "text", "text": content}] if isinstance(content, str) else (content or [])
+        sse = (
+            "event: message_start\n"
+            "data: " + json.dumps({"type": "message_start", "message": {
+                "id": "msg_cache", "type": "message", "role": "assistant", "model": model,
+                "content": [], "stop_reason": None,
+                "usage": {"input_tokens": usage.get("prompt_tokens") or 0,
+                          "output_tokens": 0}}}, ensure_ascii=False) + "\n\n"
+            "event: content_block_delta\n"
+            "data: " + json.dumps({"type": "content_block_delta", "index": 0,
+                                   "delta": {"type": "text_delta", "text": ""}}, ensure_ascii=False) + "\n\n"
+            "event: message_delta\n"
+            "data: " + json.dumps({"type": "message_delta",
+                                   "usage": {"output_tokens": usage.get("completion_tokens") or 0}},
+                                  ensure_ascii=False) + "\n\n"
+            "event: message_stop\n"
+            "data: " + json.dumps({"type": "message_stop"}, ensure_ascii=False) + "\n\n"
+        )
+        _ = blocks
+    return StreamingResponse(_sse_iter(sse), media_type="text/event-stream",
+                             headers={"X-IcyCache-Upstream": "cache", "X-IcyCache-Hit": "1"})
+
+
+async def forward_json(req_id: str, url: str, headers: Dict[str, str], body: Dict[str, Any],
+                       upstream: str, kind: str, ckey: str, raw_hash: str, cacheable: bool,
+                       cache_reason: str, t0: float, lab: str, path: str, is_chat: bool,
+                       is_embed: bool, injected: Optional[str]):
+    t_fwd = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.post(url, json=body, headers=headers)
+    except httpx.RequestError as exc:
+        return JSONResponse({"error": {"message": f"upstream unreachable: {exc}", "type": "upstream_error",
+                                       "upstream": upstream}}, status_code=502)
+
+    if resp.status_code >= 400:
+        return Response(content=resp.content, status_code=resp.status_code,
+                        media_type=resp.headers.get("content-type", "application/json"),
+                        headers={"X-IcyCache-Upstream": upstream})
+
+    gen_time = int((time.perf_counter() - t_fwd) * 1000)
+    latency_ms = int((time.perf_counter() - t0) * 1000)
+    try:
+        data = resp.json()
+    except Exception:
+        data = {}
+
+    raw_usage = data.get("usage") or {}
+    norm = usage_from(kind, raw_usage)
+    pt = norm.get("prompt_tokens")
+    ct = norm.get("completion_tokens")
+    model = data.get("model") or body.get("model")
+
+    message = None
+    finish = "stop"
+    if kind == "anthropic":
+        content = data.get("content")
+        message = {"role": "assistant", "content": content if content is not None else ""}
+        finish = data.get("stop_reason") or "end_turn"
     else:
-        user_prompt_text = user_prompt
-    normalized = normalizer.normalize(user_prompt_text)
-    logger.info(f"Normalized prompt: {normalized[:100]}...")
-    
-    # Hash du payload complet (clé de cache robuste)
-    p_hash = hashlib.sha256(json.dumps(cache_payload, sort_keys=True).encode('utf-8')).hexdigest()
-    
-    # CHECK CACHE
-    # FIX #5: Bypass cache si température > 0 (évite réponses figées non déterministes)
-    temp = body.get('temperature', 0.0)
-    should_cache = (temp == 0.0)
-    if should_cache:
-        cached = cache.get(p_hash)
-    else:
-        logger.warning(f"CACHE BYPASS: temperature={temp} > 0.0 (non-deterministic)")
-        cached = None
-    if cached:
-        logger.info(f"CACHE HIT: {p_hash[:8]}... (access_count={cached['access_count']})")
+        choices = data.get("choices") or []
+        if choices:
+            message = choices[0].get("message") or {}
+            finish = choices[0].get("finish_reason") or "stop"
 
-        # Déballage entrée v2 ({_v:2, message, usage, gen_time_ms}); v1 = message nu
-        saved_usage, gen_time, fin = {}, None, "stop"
-        if not cached['is_stream']:
-            try:
-                _s = json.loads(cached['response'])
-            except json.JSONDecodeError:
-                _s = None
-            if isinstance(_s, dict) and _s.get("_v") == 2:
-                saved_usage = _s.get("usage") or {}
-                gen_time = _s.get("gen_time_ms")
-                fin = _s.get("finish_reason") or "stop"
-                cached['response'] = json.dumps(_s["message"], ensure_ascii=False)
+    log_event("MISS" if cacheable else "BYPASS", ckey, body.get("model"), model, False, pt, ct,
+              latency_ms=latency_ms, upstream=upstream, client=lab,
+              cached_tokens=norm.get("cached_tokens"),
+              cache_write_tokens=norm.get("cache_write_tokens"), req_id=req_id)
+
+    if cacheable and (is_chat or is_embed):
+        stored = encode_entry(kind, message, norm, model, finish, "", gen_time)
         try:
-            _c = datetime.strptime(cached['created_at'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-            cache_age_sec = int((datetime.now(timezone.utc) - _c).total_seconds())
+            CACHE.set(ckey, icy_normalize.get_default_normalizer().normalize(display_prompt(body)),
+                      display_prompt(body), stored, False, upstream, model, raw_hash)
         except Exception:
-            cache_age_sec = None
+            _log.exception("CACHE.set (json) a echoue")
 
-        # Usage d'origine (events) -> saved_*, modèle réel, event HIT
-        _o = original_usage(p_hash)
-        _sp = (_o[0] if _o else saved_usage.get("prompt_tokens")) or 0
-        _sc = (_o[1] if _o else saved_usage.get("completion_tokens")) or 0
-        saved_usage = {"prompt_tokens": _sp, "completion_tokens": _sc, "total_tokens": _sp + _sc}
-        cached['model'] = (_o[2] if _o else None) or cached['model']
-        log_event('HIT', p_hash, body.get('model'), cached['model'], body.get('stream', False),
-                  sp=_sp, sc=_sc, latency_ms=int((time.perf_counter() - t0) * 1000))
-        
-        # Reconstruction de la réponse
-        # FIX: Conversion de format si mismatch entre cache et requête
-        requested_stream = body.get('stream', False)
-        cached_stream = cached['is_stream']
-        
-        if requested_stream != cached_stream:
-            logger.info(f"CACHE FORMAT CONVERSION: cached={'stream' if cached_stream else 'json'}, requested={'stream' if requested_stream else 'json'}")
-        
-            if cached_stream and not requested_stream:
-                # Convertir SSE -> JSON (content + tool_calls + finish_reason)
-                content_parts, tcs, fin_s = [], {}, None
-                for sse_line in cached['response'].split('\n'):
-                    if not sse_line.startswith('data: ') or sse_line.startswith('data: [DONE]'):
-                        continue
-                    try:
-                        chunk = json.loads(sse_line[6:])
-                    except Exception:
-                        continue
-                    for ch in (chunk.get('choices') or []):
-                        delta = ch.get('delta') or {}
-                        if delta.get('content'):
-                            content_parts.append(delta['content'])
-                        for tc in (delta.get('tool_calls') or []):
-                            slot = tcs.setdefault(tc.get('index', 0), {"id": None, "type": "function",
-                                                                       "function": {"name": "", "arguments": ""}})
-                            if tc.get('id'):
-                                slot['id'] = tc['id']
-                            fn = tc.get('function') or {}
-                            if fn.get('name'):
-                                slot['function']['name'] += fn['name']
-                            if fn.get('arguments'):
-                                slot['function']['arguments'] += fn['arguments']
-                        if ch.get('finish_reason'):
-                            fin_s = ch['finish_reason']
-                full_content = ''.join(content_parts)
-                msg = {"role": "assistant", "content": full_content if (full_content or not tcs) else None}
-                if tcs:
-                    msg["tool_calls"] = [tcs[i] for i in sorted(tcs)]
-                fin = fin_s or "stop"
-                cached['response'] = json.dumps(msg, ensure_ascii=False)
-                cached['is_stream'] = False
-            
-            elif not cached_stream and requested_stream:
-                # Convertir JSON -> SSE (content + tool_calls + finish_reason)
-                try:
-                    message = json.loads(cached['response'])
-                    content = message.get('content') or ''
-                    tcalls = message.get('tool_calls') or []
-                except Exception:
-                    content, tcalls = cached['response'], []
-                delta = {"role": "assistant"}
-                if content:
-                    delta["content"] = content
-                if tcalls:
-                    delta["tool_calls"] = [{"index": i, **tc} for i, tc in enumerate(tcalls)]
-                sse_chunk = {
-                    "id": f"chatcmpl-cache-{p_hash[:8]}",
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": cached['model'],
-                    "choices": [{"index": 0, "delta": delta, "finish_reason": fin}]
-                }
-                cached['response'] = f"data: {json.dumps(sse_chunk)}\n\ndata: [DONE]\n\n"
-                cached['is_stream'] = True
+    if kind == "anthropic":
+        payload = build_anthropic_response(message, model, finish, anthropic_usage(raw_usage))
+    else:
+        payload = data if isinstance(data, dict) and data else build_openai_response(message, model, finish,
+                                                                                    openai_usage(norm))
+    return JSONResponse(payload, headers={"X-IcyCache-Upstream": upstream,
+                                          "X-IcyCache-Tokens-Source": "upstream" if pt is not None else "n/a"})
 
-        if cached['is_stream']:
-            async def stream_cached():
-                for line in cached['response'].split('\n'):
-                    if line.strip() and not line.startswith('data: [DONE]'):
-                        yield f"{line}\n\n"
-                yield "data: [DONE]\n\n"
-            
-            return StreamingResponse(stream_cached(), media_type="text/event-stream")
-        else:
-            # FIX: Désérialiser le message complet (v2) ou fallback texte brut (v1)
-            try:
-                cached_message = json.loads(cached['response'])
-            except json.JSONDecodeError:
-                cached_message = {"role": "assistant", "content": cached['response']}
-            
-            return JSONResponse({
-                "id": f"chatcmpl-cache-{p_hash[:8]}",
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": cached['model'],
-                "choices": [{
-                    "index": 0,
-                    "message": cached_message,
-                    "finish_reason": fin
-                }],
-                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                "saved_prompt_tokens": saved_usage.get("prompt_tokens", 0),
-                "saved_completion_tokens": saved_usage.get("completion_tokens", 0),
-                "saved_total_tokens": saved_usage.get("total_tokens", 0),
-                "original_gen_time_ms": gen_time,
-                "cache_age_seconds": cache_age_sec,
-                "hit_count": cached.get('access_count', 1),
-                "cached": True,
-                "cache_hash": p_hash[:8]
-            })
-    
-    # CACHE MISS : Forward au provider
-    target_url = CONFIG['proxy']['target_provider']
-    api_key = CONFIG['proxy'].get('api_key')
-    timeout = CONFIG['proxy'].get('timeout', 120)
-    
-    logger.info(f"CACHE MISS: {p_hash[:8]}... → Forwarding to {target_url}")
-    
-    # Déterminer provider name et localisation (local/cloud)
-    def _parse_provider_info(url: str) -> tuple[str, str]:
-        """Retourne (provider_name, location) depuis l'URL cible."""
-        if 'localhost' in url or '127.0.0.1' in url:
-            if '20128' in url:
-                return 'omniroute', 'local'
-            elif '1234' in url:
-                return 'lmstudio', 'local'
-            else:
-                return 'local-other', 'local'
-        elif 'groq.com' in url:
-            return 'groq', 'cloud'
-        elif 'openrouter.ai' in url:
-            return 'openrouter', 'cloud'
-        elif 'cloudflare.com' in url:
-            return 'cloudflare', 'cloud'
-        elif 'mistral.ai' in url:
-            return 'mistral', 'cloud'
-        else:
-            return 'unknown-cloud', 'cloud'
-    
-    provider_name, location = _parse_provider_info(target_url)
-    
-    headers = {'Content-Type': 'application/json'}
-    if api_key:
-        headers['Authorization'] = f'Bearer {api_key}'
-    
-    is_stream = body.get('stream', False)
-    
-    wants_usage = bool((body.get('stream_options') or {}).get('include_usage'))
 
-    async def generate_and_cache(client, response, t_fwd):
-        accumulated_response = []
-        usage, model_real, ttft_ms = {}, None, None
+async def forward_stream(req_id: str, url: str, headers: Dict[str, str], body: Dict[str, Any],
+                         upstream: str, kind: str, ckey: str, raw_hash: str, cacheable: bool,
+                         cache_reason: str, t0: float, lab: str, path: str, is_chat: bool,
+                         is_embed: bool, injected: Optional[str]):
+    t_fwd = time.perf_counter()
+    client = httpx.AsyncClient(timeout=TIMEOUT)
+    try:
+        response = await client.send(client.build_request("POST", url, json=body, headers=headers), stream=True)
+    except httpx.RequestError as exc:
+        await client.aclose()
+        return JSONResponse({"error": {"message": f"upstream unreachable: {exc}", "type": "upstream_error",
+                                       "upstream": upstream}}, status_code=502)
+
+    if response.status_code >= 400:
+        err = await response.aread()
+        ctype = response.headers.get("content-type", "application/json")
+        status = response.status_code
+        await response.aclose()
+        await client.aclose()
+        return Response(content=err, status_code=status, media_type=ctype,
+                        headers={"X-IcyCache-Upstream": upstream})
+
+    meter = StreamMeter(kind)
+    state = {"chunks": 0, "ttft_ms": None, "sse": [], "last_push": 0.0, "ok": False}
+
+    async def gen():
+        """Rejoue les bytes upstream tels quels (fidelite SSE), tout en mesurant.
+
+        - les octets recus sont forwarding intacts (le client voit exactement
+          ce que l'upstream a produit) ;
+        - les lignes completes sont en parallele passees au StreamMeter pour
+          extraire l'usage REEL et le modele ;
+        - le compteur de chunks et le TTFT alimentent le WebSocket.
+        """
+        buffer = b""
         try:
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
-                usage_only = False
-                if line.startswith('data: ') and not line.startswith('data: [DONE]'):
-                    try:
-                        ch = json.loads(line[6:])
-                        model_real = ch.get('model') or model_real
-                        if ch.get('usage'):
-                            usage = ch['usage']
-                            usage_only = not ch.get('choices')
-                        elif ttft_ms is None and ((ch.get('choices') or [{}])[0].get('delta') or {}).get('content'):
-                            ttft_ms = int((time.perf_counter() - t_fwd) * 1000)
-                    except Exception:
-                        pass
-                if usage_only and not wants_usage:
-                    continue
-                yield f"{line}\n\n"
-                if not usage_only and not line.startswith('data: [DONE]'):
-                    accumulated_response.append(line)
+            async for raw in response.aiter_bytes():
+                buffer += raw
+                while b"\n" in buffer:
+                    line_bytes, buffer = buffer.split(b"\n", 1)
+                    meter.feed(line_bytes + b"\n")
+                    line = line_bytes.decode("utf-8", "replace").strip()
+                    if state["ttft_ms"] is None and line.startswith("data:"):
+                        try:
+                            ev = json.loads(line[5:].strip())
+                            delta = (ev.get("choices") or [{}])[0].get("delta") or {}
+                            if delta.get("content") or ev.get("type") == "content_block_delta":
+                                state["ttft_ms"] = int((time.perf_counter() - t_fwd) * 1000)
+                        except Exception:
+                            pass
+                state["chunks"] += 1
+                state["sse"].append(raw.decode("utf-8", "replace"))
+                now = time.perf_counter()
+                if now - state["last_push"] >= WS_DELTA_INTERVAL:
+                    state["last_push"] = now
+                    hub.publish({"type": "delta", "id": req_id, "ts": utc_iso(), "upstream": upstream,
+                                 "client": lab, "model": meter.model or body.get("model"),
+                                 "chunks": state["chunks"], "ttft_ms": state["ttft_ms"]})
+                yield raw
+            if buffer:
+                meter.feed(buffer)
+            state["ok"] = True
         except (asyncio.CancelledError, GeneratorExit):
-            logger.warning(f"STREAM ABORTED by client: {p_hash[:8]}... (not cached, no event)")
             raise
         except Exception:
-            logger.exception(f"STREAM ERROR mid-stream: {p_hash[:8]}... (not cached)")
-            raise
+            pass
         finally:
             try:
                 await response.aclose()
@@ -815,116 +718,100 @@ async def proxy_chat(request: Request):
             except Exception:
                 pass
 
-        log_event('MISS' if should_cache else 'BYPASS', p_hash, body.get('model'), model_real, True,
-                  usage.get('prompt_tokens'), usage.get('completion_tokens'),
-                  latency_ms=int((time.perf_counter() - t_fwd) * 1000), ttft_ms=ttft_ms)
+        norm = usage_from(kind, meter.usage)
+        pt = norm.get("prompt_tokens")
+        ct = norm.get("completion_tokens")
+        latency_ms = int((time.perf_counter() - t_fwd) * 1000)
+        model = meter.model or body.get("model")
+        log_event("MISS" if cacheable else "BYPASS", ckey, body.get("model"), model, True, pt, ct,
+                  latency_ms=latency_ms, ttft_ms=state["ttft_ms"], upstream=upstream, client=lab,
+                  cached_tokens=norm.get("cached_tokens"),
+                  cache_write_tokens=norm.get("cache_write_tokens"), req_id=req_id)
 
-        # Sauvegarde post-stream
-        full_response = '\n'.join(accumulated_response)
-        if should_cache:
-            try:
-                cache.set(
-                                    prompt_hash=p_hash,
-                                    normalized=normalized,
-                                    original=user_prompt_text,
-                                    response=full_response,
-                                    is_stream=True,
-                                    provider=provider_name,
-                                    model=model_real or body.get('model', 'unknown')
-                                )
-            except Exception:
-                logger.exception("CACHE SAVE failed (stream)")
-        else:
-            logger.info("CACHE SKIP: Not saving non-deterministic stream response")
-
-    if is_stream:
-        fwd = dict(body)
-        fwd['stream_options'] = {**(body.get('stream_options') or {}), 'include_usage': True}
-        t_fwd = time.perf_counter()
-        client = httpx.AsyncClient(timeout=timeout)
-        try:
-            response = await client.send(
-                client.build_request('POST', target_url, json=fwd, headers=headers), stream=True)
-        except httpx.RequestError as e:
-            await client.aclose()
-            logger.exception(f"UPSTREAM UNREACHABLE (stream): {type(e).__name__}: {e}")
-            return JSONResponse({"error": {"message": f"upstream unreachable: {type(e).__name__}: {e}",
-                                           "type": "upstream_error"}}, status_code=502)
-        if response.status_code >= 400:
-            err_body = await response.aread()
-            ctype = response.headers.get('content-type', 'application/json')
-            status = response.status_code
-            await response.aclose()
-            await client.aclose()
-            logger.error(f"UPSTREAM {status} (stream) body={err_body.decode('utf-8', 'replace')[:2000]}")
-            return Response(content=err_body, status_code=status, media_type=ctype)
-        return StreamingResponse(generate_and_cache(client, response, t_fwd), media_type="text/event-stream")
-    else:
-        # Non-streaming
-        forward_start = time.perf_counter()
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            try:
-                resp = await client.post(target_url, json=body, headers=headers)
-            except httpx.RequestError as e:
-                logger.exception(f"UPSTREAM UNREACHABLE (non-stream): {type(e).__name__}: {e}")
-                return JSONResponse({"error": {"message": f"upstream unreachable: {type(e).__name__}: {e}",
-                                               "type": "upstream_error"}}, status_code=502)
-            if resp.status_code >= 400:
-                logger.error(f"UPSTREAM {resp.status_code} (non-stream) body={resp.text[:2000]}")
-                return Response(content=resp.content, status_code=resp.status_code,
-                                media_type=resp.headers.get('content-type', 'application/json'))
-            resp_json = resp.json()
-            gen_time = int((time.perf_counter() - forward_start) * 1000)
-
-            # FIX #5: Bypass cache si température > 0 (path non-streaming)
-            temp = body.get('temperature', 0.0)
-            should_cache = (temp == 0.0)
-            if not should_cache:
-                logger.warning(f"CACHE BYPASS: temperature={temp} > 0.0 (non-streaming)")
-
-            _u = resp_json.get("usage") or {}
-            log_event('MISS' if should_cache else 'BYPASS', p_hash, body.get('model'),
-                      resp_json.get('model'), False, _u.get('prompt_tokens'),
-                      _u.get('completion_tokens'), latency_ms=gen_time)
-            
-            # FIX: Stocker le message complet (gère content ET tool_calls)
-            message = resp_json.get('choices', [{}])[0].get('message', {})
-            response_to_cache = json.dumps(
-                {"_v": 2, "message": message, "usage": resp_json.get("usage") or {}, "gen_time_ms": gen_time,
-                 "finish_reason": (resp_json.get('choices') or [{}])[0].get('finish_reason')},
-                ensure_ascii=False)
-
-            if should_cache:
-                cache.set(
-                                    prompt_hash=p_hash,
-                                    normalized=normalized,
-                                    original=user_prompt_text,
-                                    response=response_to_cache,
-                                    is_stream=False,
-                                    provider=provider_name,
-                                    model=resp_json.get('model') or body.get('model', 'unknown')
-                                )
+        _sse_all = "".join(state["sse"])
+        _complete = state["ok"] and (("[DONE]" in _sse_all) if kind == "openai"
+                                     else ("message_stop" in _sse_all))
+        if cacheable and (is_chat or is_embed) and not _complete:
+            _log.warning("flux incomplet: NON cache (req %s, upstream %s)", req_id, upstream)
+        if cacheable and (is_chat or is_embed) and _complete:
+            sse_text = _sse_all
+            if kind == "openai":
+                msg, m2, finish = sse_to_message(sse_text)
+                stored = encode_entry("openai", msg, norm, m2 or model, finish or "stop", sse_text, latency_ms)
             else:
-                logger.info("CACHE SKIP: Not saving non-deterministic non-stream response")
-            
-            return JSONResponse(resp_json)
+                stored = encode_entry("anthropic", None, norm, model, "end_turn", sse_text, latency_ms)
+            try:
+                CACHE.set(ckey, icy_normalize.get_default_normalizer().normalize(display_prompt(body)),
+                          display_prompt(body), stored, True, upstream, model, raw_hash)
+            except Exception:
+                _log.exception("CACHE.set (stream) a echoue")
 
-@app.get("/health")
-async def health_check():
-    """Endpoint de santé"""
-    return {
-        'status': 'healthy',
-        # Identité du projet: permet à un lanceur de détecter qu'une AUTRE
-        # version (ex: l'ancien D:\CacheForge) occupe déjà le port.
-        'service': 'IcyCache',
-        'project_root': str(PROJECT_ROOT),
-        'cache_stats': cache.get_stats(),
-        'target_provider': CONFIG['proxy']['target_provider']
-    }
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"X-IcyCache-Upstream": upstream,
+                                      "X-IcyCache-Cache-Reason": cache_reason,
+                                      "X-IcyCache-Injected": injected or "none"})
 
 
-def _tcp_alive(host: str, port: int, timeout: float = 0.7) -> tuple:
-    """Liveness TCP brute : (alive, latency_ms). Evite toute dependance HTTP/CORS."""
+# =============================================================================
+# WEBSOCKET /ws/events
+# =============================================================================
+@app.websocket("/ws/events")
+async def ws_events(websocket: WebSocket):
+    """Flux temps reel : 'delta' pendant le streaming, 'final' a la fin (tokens reels)."""
+    origin = websocket.headers.get("origin")
+    if origin and not re.match(r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$", origin):
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    queue = hub.subscribe()
+    subs = {"upstreams": None}
+
+    async def pump():
+        try:
+            while True:
+                ev = await queue.get()
+                if subs["upstreams"] and ev.get("upstream") not in subs["upstreams"]:
+                    continue
+                await websocket.send_json(ev)
+        except Exception:
+            return
+
+    pump_task = asyncio.create_task(pump())
+    try:
+        await websocket.send_json({
+            "type": "hello",
+            "ts": utc_iso(),
+            "protocol": "icycache.ws/v1",
+            "upstreams": _upstream_names(),
+            "default_upstream": DEFAULT_UPSTREAM,
+            "note": "Tokens = usage reel de l'upstream. NULL = absent chez l'upstream (jamais estime).",
+        })
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                continue
+            mtype = msg.get("type")
+            if mtype == "ping":
+                await websocket.send_json({"type": "pong", "ts": utc_iso()})
+            elif mtype == "subscribe":
+                subs["upstreams"] = set(msg.get("upstreams") or []) or None
+                await websocket.send_json({"type": "subscribed", "ts": utc_iso(),
+                                           "upstreams": sorted(subs["upstreams"]) if subs["upstreams"] else None})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        pump_task.cancel()
+        hub.unsubscribe(queue)
+
+
+# =============================================================================
+# OBSERVABILITE (formes compatibles avec le dashboard existant)
+# =============================================================================
+def _tcp_alive(host: str, port: int, timeout: float = 0.7) -> Tuple[bool, Optional[float]]:
     t0 = time.perf_counter()
     try:
         with socket.create_connection((host, int(port)), timeout=timeout):
@@ -933,125 +820,84 @@ def _tcp_alive(host: str, port: int, timeout: float = 0.7) -> tuple:
         return False, None
 
 
-def _mcp_tool_names() -> list:
-    """Noms des outils MCP exposes (introspection, repli statique)."""
-    try:
-        tm = getattr(mcp, "_tool_manager", None)
-        if tm is not None:
-            # list_tools() est l'API publique du ToolManager; on evite le dict
-            # prive _tools qui casse a chaque mise a jour du SDK MCP.
-            names = [getattr(t, "name", None) for t in tm.list_tools()]
-            names = [n for n in names if n]
-            if names:
-                return sorted(names)
-    except Exception:
-        logger.debug("introspection des outils MCP impossible", exc_info=True)
-    return ["check_tool_loop", "clear_cache", "clear_tool_cache", "get_cache_stats",
-            "get_tool_cache_stats", "list_proxy_servers", "list_proxy_tools",
-            "normalize_preview", "proxy_tool", "proxy_tools", "search_cached_prompts"]
-
-
-@app.get("/api/tools")
-async def api_list_tools():
-    """Serveurs MCP routables via le proxy IcyCache."""
-    if not TOOL_PROXY_OK:
-        return JSONResponse({"ok": False, "error": "tool_proxy indisponible"}, status_code=503)
-    names = tp.server_names()
-    return {"ok": True, "servers": names, "count": len(names)}
-
-
-@app.get("/api/tools/{server}")
-async def api_list_server_tools(server: str):
-    """Outils exposes par un serveur MCP cible."""
-    if not TOOL_PROXY_OK:
-        return JSONResponse({"ok": False, "error": "tool_proxy indisponible"}, status_code=503)
-    return await tp.list_server_tools(server)
-
-
-@app.post("/api/tools/call")
-async def api_call_tool(request: Request):
-    """Appelle un outil MCP via le proxy (body: {server, tool, args, client})."""
-    if not TOOL_PROXY_OK:
-        return JSONResponse({"ok": False, "error": "tool_proxy indisponible"}, status_code=503)
-    try:
-        body = await request.json()
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}")
-    return await tp.call_tool(body.get("server"), body.get("tool"),
-                              body.get("args") or {}, body.get("client"))
-
-
-@app.get("/api/tools/stats")
-async def api_tool_cache_stats():
-    """Statistiques du cache d'outils."""
-    if not TOOL_PROXY_OK:
-        return JSONResponse({"ok": False, "error": "tool_proxy indisponible"}, status_code=503)
-    return tp.stats()
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "cache_stats": CACHE.stats(),
+            "upstreams": _upstream_names(), "default_upstream": DEFAULT_UPSTREAM}
 
 
 @app.get("/api/status")
 async def api_status():
-    """Statut live du proxy, du serveur MCP et de l'upstream (liveness TCP)."""
-    mcp_host = CONFIG['mcp'].get('host', '127.0.0.1')
-    mcp_port = int(CONFIG['mcp'].get('port', 8081))
+    mcp_host = CONFIG.get("mcp", {}).get("host", "127.0.0.1")
+    mcp_port = int(CONFIG.get("mcp", {}).get("port", 8081))
     mcp_alive, mcp_ms = _tcp_alive(mcp_host, mcp_port)
-
-    target = CONFIG['proxy']['target_provider']
-    up_host, up_port = '127.0.0.1', 80
-    m = re.search(r'://([^:/]+)(?::(\d+))?', target)
-    if m:
-        up_host = m.group(1)
-        up_port = int(m.group(2) or (443 if target.startswith('https') else 80))
-    up_alive, up_ms = _tcp_alive(up_host, up_port)
-
+    ups = {}
+    for name, cfg in UPSTREAMS.items():
+        m = re.search(r"://([^:/]+)(?::(\d+))?", str(cfg.get("base_url", "")))
+        if m:
+            host = m.group(1)
+            port = int(m.group(2) or (443 if str(cfg.get("base_url", "")).startswith("https") else 80))
+            alive, ms = _tcp_alive(host, port)
+            ups[name] = {"alive": alive, "latency_ms": ms, "base_url": cfg.get("base_url"),
+                         "kind": cfg.get("kind", "openai")}
     return {
-        'proxy': {'alive': True, 'host': CONFIG['proxy']['host'], 'port': CONFIG['proxy']['port']},
-        'mcp': {'alive': mcp_alive, 'latency_ms': mcp_ms, 'host': mcp_host, 'port': mcp_port,
-                'transports': CONFIG['mcp'].get('transport', []), 'tools': _mcp_tool_names()},
-        'upstream': {'alive': up_alive, 'latency_ms': up_ms, 'target_provider': target},
-        'server_time': datetime.now(timezone.utc).isoformat(),
+        "proxy": {"alive": True, "host": PROXY_CFG.get("host", "127.0.0.1"),
+                  "port": PROXY_CFG.get("port", 8080)},
+        "mcp": {"alive": mcp_alive, "latency_ms": mcp_ms, "host": mcp_host, "port": mcp_port,
+                "transports": CONFIG.get("mcp", {}).get("transport", []), "tools": list(_MCP_TOOL_NAMES)},
+        "upstream": ups,
+        "gateway": {"default_upstream": DEFAULT_UPSTREAM, "upstreams": _upstream_names(),
+                    "websocket": "/ws/events"},
+        "server_time": datetime.now(timezone.utc).isoformat(),
     }
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard():
-    """Dashboard web pour monitoring cache"""
-    html_path = PROJECT_ROOT / "static" / "dashboard.html"
-    return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
 
 @app.get("/api/dashboard-stats")
 async def dashboard_stats():
-    """Stats JSON pour le dashboard (auto-refresh)"""
+    import sqlite3
     conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT prompt_hash, model, normalized_prompt, access_count, datetime(created_at, 'localtime') FROM cache ORDER BY last_accessed DESC LIMIT 50")
-    prompts = [{"hash": r[0][:8] + "...", "model": r[1], "normalized_prompt": r[2][:80] + ("..." if len(r[2]) > 80 else ""), "access_count": r[3], "created_at": r[4]} for r in cursor.fetchall()]
-    conn.close()
-    return {"stats": cache.get_stats(), "target_provider": CONFIG["proxy"]["target_provider"], "prompts": prompts}
+    try:
+        rows = conn.execute("SELECT prompt_hash, model, normalized_prompt, access_count, "
+                            "datetime(created_at, 'localtime') FROM cache ORDER BY last_accessed DESC LIMIT 50").fetchall()
+    finally:
+        conn.close()
+    prompts = [{"hash": r[0][:8] + "...", "model": r[1],
+                "normalized_prompt": (r[2] or "")[:80] + ("..." if len(r[2] or "") > 80 else ""),
+                "access_count": r[3], "created_at": r[4]} for r in rows]
+    # no-store: sans cet en-tete le navigateur ressert un payload perime et le
+    # dashboard affiche des compteurs figes (0) alors que la base a des donnees.
+    return JSONResponse({"stats": CACHE.stats(), "target_provider": DEFAULT_UPSTREAM, "prompts": prompts,
+                         "upstreams": _upstream_names()},
+                        headers={"Cache-Control": "no-store, must-revalidate"})
 
-def _metrics_snapshot():
-    """Instantane des compteurs. Source unique pour /api/metrics et /api/live."""
+
+@app.get("/api/metrics")
+async def api_metrics():
+    import sqlite3
     conn = sqlite3.connect(DB_FILE)
-    ok = "kind!='HIT' AND completion_tokens>0 AND latency_ms>0"
-    r = conn.execute(f"""SELECT COUNT(*), COALESCE(SUM(kind='HIT'),0), COALESCE(SUM(kind='MISS'),0),
-        COALESCE(SUM(kind='BYPASS'),0),
-        COALESCE(SUM(CASE WHEN kind!='HIT' THEN prompt_tokens END),0),
-        COALESCE(SUM(CASE WHEN kind!='HIT' THEN completion_tokens END),0),
-        COALESCE(SUM(saved_prompt),0), COALESCE(SUM(saved_completion),0),
-        COALESCE(SUM(CASE WHEN {ok} THEN completion_tokens END),0),
-        COALESCE(SUM(CASE WHEN {ok} THEN latency_ms END),0),
-        COALESCE(SUM(CASE WHEN kind!='HIT' AND prompt_tokens IS NULL THEN 1 END),0),
-        COALESCE(SUM(CASE WHEN kind!='HIT' AND completion_tokens>0 AND ttft_ms>0 AND latency_ms>ttft_ms THEN completion_tokens END),0),
-        COALESCE(SUM(CASE WHEN kind!='HIT' AND completion_tokens>0 AND ttft_ms>0 AND latency_ms>ttft_ms THEN latency_ms-ttft_ms END),0)
-        FROM events""").fetchone()
-    rows = conn.execute("""SELECT datetime(ts,'localtime'), kind, model_real, prompt_tokens,
-        completion_tokens, latency_ms, ttft_ms, saved_prompt+saved_completion
-        FROM events ORDER BY id DESC LIMIT 50""").fetchall()
-    conn.close()
+    try:
+        ok = "kind!='HIT' AND completion_tokens>0 AND latency_ms>0"
+        r = conn.execute(f"""SELECT COUNT(*), COALESCE(SUM(kind='HIT'),0), COALESCE(SUM(kind='MISS'),0),
+            COALESCE(SUM(kind='BYPASS'),0),
+            COALESCE(SUM(CASE WHEN kind!='HIT' THEN prompt_tokens END),0),
+            COALESCE(SUM(CASE WHEN kind!='HIT' THEN completion_tokens END),0),
+            COALESCE(SUM(saved_prompt),0), COALESCE(SUM(saved_completion),0),
+            COALESCE(SUM(CASE WHEN {ok} THEN completion_tokens END),0),
+            COALESCE(SUM(CASE WHEN {ok} THEN latency_ms END),0),
+            COALESCE(SUM(CASE WHEN kind!='HIT' AND prompt_tokens IS NULL THEN 1 END),0),
+            COALESCE(SUM(CASE WHEN kind!='HIT' AND completion_tokens>0 AND ttft_ms>0 AND latency_ms>ttft_ms+500 THEN completion_tokens END),0),
+            COALESCE(SUM(CASE WHEN kind!='HIT' AND completion_tokens>0 AND ttft_ms>0 AND latency_ms>ttft_ms+500 THEN latency_ms-ttft_ms END),0)
+            FROM events""").fetchone()
+        rows = conn.execute("""SELECT datetime(ts,'localtime'), kind, model_real, prompt_tokens,
+            completion_tokens, latency_ms, ttft_ms, saved_prompt+saved_completion
+            FROM events ORDER BY id DESC LIMIT 50""").fetchall()
+    finally:
+        conn.close()
     n, hits, miss, byp, tin, tout, sin, sout, tk_c, tk_ms, no_usage, d_c, d_ms = r
     spent, saved = tin + tout, sin + sout
     recent = [{"ts": x[0], "kind": x[1], "model": x[2], "in": x[3], "out": x[4],
-               "tks": round(x[4] * 1000 / x[5], 1) if x[1] != 'HIT' and x[4] and x[5] else None,
-               "tks_decode": round(x[4] * 1000 / (x[5] - x[6]), 1) if x[1] != 'HIT' and x[4] and x[5] and x[6] and x[5] > x[6] else None,
+               "tks": round(x[4] * 1000 / x[5], 1) if x[1] != "HIT" and x[4] and x[5] else None,
+               "tks_decode": round(x[4] * 1000 / (x[5] - x[6]), 1) if x[1] != "HIT" and x[4] and x[5] and x[6] and x[5] - x[6] >= 500 else None,
                "latency_ms": x[5], "ttft_ms": x[6], "saved": x[7]} for x in rows]
     return {"requests": n, "hits": hits, "misses": miss, "bypass": byp,
             "hit_rate_pct": round(100 * hits / n, 1) if n else 0,
@@ -1065,221 +911,229 @@ def _metrics_snapshot():
             "events_without_usage": no_usage, "recent": recent}
 
 
-@app.get("/api/metrics")
-async def api_metrics():
-    return _metrics_snapshot()
-
-
-def _series_snapshot(bucket: str = "hour", hours: int = 24):
-    """Serie temporelle + agregat par modele. Source unique partagee."""
+@app.get("/api/metrics/series")
+async def api_metrics_series(bucket: str = "hour", hours: int = 24):
+    import sqlite3
     hours = max(1, min(int(hours), 720))
-    fmt = '%Y-%m-%d %H:%M' if bucket == "min" else '%Y-%m-%d %H:00'
+    fmt = "%Y-%m-%d %H:%M" if bucket == "min" else "%Y-%m-%d %H:00"
     bucket = "min" if bucket == "min" else "hour"
     conn = sqlite3.connect(DB_FILE)
-    pts = conn.execute(f"""SELECT strftime('{fmt}', ts, 'localtime') AS b,
-        COALESCE(SUM(kind='HIT'),0), COALESCE(SUM(kind='MISS'),0), COALESCE(SUM(kind='BYPASS'),0),
-        COALESCE(SUM(saved_prompt+saved_completion),0),
-        COALESCE(SUM(CASE WHEN kind!='HIT' THEN COALESCE(prompt_tokens,0)+COALESCE(completion_tokens,0) END),0)
-        FROM events WHERE ts >= datetime('now', '-' || ? || ' hours')
-        GROUP BY b ORDER BY b""", (hours,)).fetchall()
-    mdl = conn.execute("""SELECT COALESCE(model_real, model_req, '?'), COUNT(*), COALESCE(SUM(kind='HIT'),0),
-        COALESCE(SUM(saved_prompt+saved_completion),0),
-        COALESCE(SUM(CASE WHEN kind!='HIT' THEN COALESCE(prompt_tokens,0)+COALESCE(completion_tokens,0) END),0)
-        FROM events WHERE ts >= datetime('now', '-' || ? || ' hours')
-        GROUP BY 1 ORDER BY 2 DESC LIMIT 10""", (hours,)).fetchall()
-    conn.close()
+    try:
+        pts = conn.execute(f"""SELECT strftime('{fmt}', ts, 'localtime') AS b,
+            COALESCE(SUM(kind='HIT'),0), COALESCE(SUM(kind='MISS'),0), COALESCE(SUM(kind='BYPASS'),0),
+            COALESCE(SUM(saved_prompt+saved_completion),0),
+            COALESCE(SUM(CASE WHEN kind!='HIT' THEN COALESCE(prompt_tokens,0)+COALESCE(completion_tokens,0) END),0)
+            FROM events WHERE ts >= datetime('now', '-' || ? || ' hours') GROUP BY b ORDER BY b""",
+            (hours,)).fetchall()
+        mdl = conn.execute("""SELECT COALESCE(model_real, model_req, '?'), COUNT(*),
+            COALESCE(SUM(kind='HIT'),0), COALESCE(SUM(saved_prompt+saved_completion),0),
+            COALESCE(SUM(CASE WHEN kind!='HIT' THEN COALESCE(prompt_tokens,0)+COALESCE(completion_tokens,0) END),0)
+            FROM events WHERE ts >= datetime('now', '-' || ? || ' hours') GROUP BY 1 ORDER BY 2 DESC LIMIT 10""",
+            (hours,)).fetchall()
+    finally:
+        conn.close()
     return {"bucket": bucket, "hours": hours,
             "points": [{"t": p[0], "hits": p[1], "misses": p[2], "bypass": p[3], "saved": p[4], "spent": p[5]} for p in pts],
             "models": [{"model": m[0], "requests": m[1], "hits": m[2], "saved": m[3], "spent": m[4]} for m in mdl]}
 
 
-@app.get("/api/metrics/series")
-async def api_metrics_series(bucket: str = "hour", hours: int = 24):
-    """Serie temporelle (graphe dashboard) + agregat par modele sur la meme fenetre. Buckets en heure locale."""
-    return _series_snapshot(bucket, hours)
-
-
-@app.get("/api/live")
-async def api_live(request: Request, bucket: str = "hour", hours: int = 24):
-    """Flux temps reel (SSE) des metriques IcyCache.
-
-    Le dashboard ne se contente plus d'un polling toutes les 5 s : chaque
-    nouvel evenement proxy est pousse ici en moins d'une seconde, ce qui
-    rend les compteurs, le grafe 3D et le neurone reellement vivants.
-
-    Le client se reconnecte tout seul si la connexion tombe (EventSource).
-    """
-    async def gen():
-        last_sig = None
-        last_ping = time.time()
-        try:
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    snap = _metrics_snapshot()
-                    sig = (snap["requests"], snap["hits"], snap["misses"], snap["bypass"],
-                           snap["tokens_in_saved"], snap["tokens_out_saved"],
-                           snap["tokens_in_spent"], snap["tokens_out_spent"])
-                    now = time.time()
-                    if sig != last_sig:
-                        last_sig = sig
-                        payload = {"ts": now, "metrics": snap}
-                        try:
-                            payload["series"] = _series_snapshot(bucket, hours)
-                        except Exception:
-                            pass
-                        yield f"data: {json.dumps(payload)}\n\n"
-                    elif now - last_ping > 12:
-                        last_ping = now
-                        yield ": keepalive\n\n"
-                except Exception as exc:
-                    yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
-                    await asyncio.sleep(2)
-                    continue
-                await asyncio.sleep(0.7)
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            pass
-
-    return StreamingResponse(gen(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache, no-store, no-transform",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-    })
-
-
 @app.get("/api/metrics/export")
 async def api_metrics_export(since: str = "", limit: int = 10000):
-    """Export brut des events pour le GO/NOGO (schema commun Loom). ts = UTC 'YYYY-MM-DD HH:MM:SS'."""
+    import sqlite3
     limit = max(1, min(int(limit), 100000))
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
-    q = ("SELECT id, ts, kind, hash, model_req, model_real, stream, prompt_tokens, completion_tokens, "
-         "saved_prompt, saved_completion, latency_ms, ttft_ms FROM events")
-    args = []
-    if since:
-        q += " WHERE ts >= ?"
-        args.append(since)
-    q += " ORDER BY id ASC LIMIT ?"
-    args.append(limit)
-    rows = [dict(r) for r in conn.execute(q, args).fetchall()]
-    conn.close()
+    try:
+        q = ("SELECT id, ts, kind, hash, model_req, model_real, stream, prompt_tokens, completion_tokens, "
+             "saved_prompt, saved_completion, latency_ms, ttft_ms, upstream, client, cached_tokens FROM events")
+        args = []
+        if since:
+            q += " WHERE ts >= ?"
+            args.append(since)
+        q += " ORDER BY id ASC LIMIT ?"
+        args.append(limit)
+        rows = [dict(r) for r in conn.execute(q, args).fetchall()]
+    finally:
+        conn.close()
     sp = sum((r["prompt_tokens"] or 0) for r in rows if r["kind"] != "HIT")
     so = sum((r["completion_tokens"] or 0) for r in rows if r["kind"] != "HIT")
     vp = sum(r["saved_prompt"] or 0 for r in rows)
     vo = sum(r["saved_completion"] or 0 for r in rows)
     return {"schema": "icycache.metrics.export/v1",
-            "generated_at_utc": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "since": since or None, "count": len(rows),
             "summary": {"tokens_in_spent": sp, "tokens_out_spent": so, "tokens_in_saved": vp,
                         "tokens_out_saved": vo,
                         "pct_saved": round(100 * (vp + vo) / (vp + vo + sp + so), 1) if (vp + vo + sp + so) else 0},
             "events": rows}
 
+
 @app.post("/api/cache-clear")
 async def api_clear_cache(request: Request):
-    """Vide le cache via API (exige X-IcyCache-Confirm: FORCE_DELETE).
-
-    L'ancien nom X-CacheForge-Confirm reste accepte (le dashboard n'a pas encore
-    ete renomme) : les deux entetes sont traitees a l'identique.
-    """
-    confirm = (request.headers.get('x-icycache-confirm')
-               or request.headers.get('x-cacheforge-confirm'))
-    if confirm != 'FORCE_DELETE':
+    # X-IcyCache-Confirm = naming unifie. X-CacheForge-Confirm reste accepte
+    # (le dashboard n'a pas encore ete renomme).
+    confirm = (request.headers.get("x-icycache-confirm")
+               or request.headers.get("x-cacheforge-confirm"))
+    if confirm != "FORCE_DELETE":
         raise HTTPException(status_code=403, detail="Missing header X-IcyCache-Confirm: FORCE_DELETE")
-    cache.clear()
-    return {"message": "Cache vidé avec succès", "success": True}
+    n = CACHE.clear()
+    return {"message": f"Cache vidé ({n} entrées)", "success": True, "deleted": n}
 
-# === POINT D'ENTRÉE ===
+
+# Outils exposes par la couche MCP (liste de mcp_server.py ; sert au compteur du dashboard).
+_MCP_TOOL_NAMES = ("check_tool_loop", "clear_cache", "clear_tool_cache", "get_cache_stats",
+                   "get_tool_cache_stats", "list_proxy_servers", "list_proxy_tools",
+                   "normalize_preview", "proxy_tool", "proxy_tools", "search_cached_prompts")
+
+
+@app.get("/api/tools")
+async def api_list_tools():
+    """Serveurs MCP routables via le proxy d'outils (config/icycache.json -> tool_proxy)."""
+    try:
+        import tool_proxy as tp
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"tool_proxy indisponible: {exc}"}, status_code=503)
+    names = tp.server_names()
+    return {"ok": True, "servers": names, "count": len(names)}
+
+
+@app.get("/api/tools/stats")
+async def api_tool_cache_stats():
+    """Stats du cache d'outils (declaree avant /api/tools/{server})."""
+    from fastapi.responses import JSONResponse
+    try:
+        import tool_proxy as tp
+        return tp.stats()
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.get("/api/tools/{server}")
+async def api_list_server_tools(server: str):
+    """Outils exposes par un serveur MCP cible."""
+    try:
+        import tool_proxy as tp
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"tool_proxy indisponible: {exc}"}, status_code=503)
+    return await tp.list_server_tools(server)
+
+
+@app.get("/api/live")
+async def api_live(request: Request, bucket: str = "hour", hours: int = 24):
+    """Flux SSE temps reel : pousse {metrics, series} a chaque nouvel evenement (<1 s)."""
+    import sqlite3
+
+    def _sig():
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            return conn.execute("SELECT COALESCE(MAX(id),0), COUNT(*) FROM events").fetchone()
+        finally:
+            conn.close()
+
+    async def gen():
+        last_sig, last_ping = None, time.time()
+        while True:
+            if await request.is_disconnected():
+                return
+            try:
+                sig = _sig()
+                now = time.time()
+                if sig != last_sig:
+                    last_sig, last_ping = sig, now
+                    payload = {"metrics": await api_metrics(),
+                               "series": await api_metrics_series(bucket, hours)}
+                    yield f"data: {json.dumps(payload)}\n\n"
+                elif now - last_ping > 12:
+                    last_ping = now
+                    yield ": keepalive\n\n"
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("api/live")
+                yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+                await asyncio.sleep(2)
+            await asyncio.sleep(0.7)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    from fastapi.responses import Response
+    return Response(status_code=204)
+
+
+@app.get("/api/agent-events")
+async def api_agent_events(limit: int = 50, kind: str = ""):
+    kinds = [k for k in (kind or "").split(",") if k] or None
+    return {"events": icy_core.agent_events_recent(limit=limit, kinds=kinds)}
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """Sert le dashboard existant (lecture seule, aucune modification)."""
+    html = PROJECT_ROOT / "static" / "dashboard.html"
+    if not html.exists():
+        raise HTTPException(status_code=404, detail="dashboard.html absent")
+    return HTMLResponse(html.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
+
+
+# ==== Anti-cache API =========================================================
+# Les endpoints d'observabilite renvoyaient un corps JSON sans Cache-Control.
+# Chrome pouvait donc resservir un payload perime -> dashboard fige a 0 alors
+# que la base contenait des donnees. On force no-store sur toute l'API.
+@app.middleware("http")
+async def _no_store_api(request: Request, call_next):
+    resp = await call_next(request)
+    if request.url.path.startswith(("/api/", "/health")):
+        resp.headers["Cache-Control"] = "no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    return resp
+
+
+# ==== Assets du dashboard ====================================================
+# dashboard.html reference three.min.js / icywebgl.js / logo.svg a la RACINE.
+# Liste blanche stricte (pas de directory traversal) + montage /static.
+_ROOT_ASSETS = {"three.min.js": "application/javascript",
+                "icywebgl.js": "application/javascript",
+                "logo.svg": "image/svg+xml"}
+
+
+@app.get("/v1/models")
+async def models_endpoint(request: Request):
+    """Liste des modeles de l'upstream (meme traitement que /<upstream>/v1/models)."""
+    return await handle_llm(request, "/v1/models")
+
+
+@app.get("/{asset_name}")
+async def root_asset(asset_name: str):
+    media = _ROOT_ASSETS.get(asset_name)
+    path = PROJECT_ROOT / "static" / asset_name
+    if media is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "no-cache"})
+
+
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
+
+
+# =============================================================================
 if __name__ == "__main__":
     import argparse
-    
-    parser = argparse.ArgumentParser(description="IcyCache Server")
-    parser.add_argument('--mode', choices=['proxy', 'mcp-stdio', 'mcp-sse', 'mcp-http', 'all'],
-                       default='all', help="Mode de démarrage")
-    
+
+    parser = argparse.ArgumentParser(description="IcyCache Gateway (multi-upstream)")
+    parser.add_argument("--port", type=int, default=int(GW.get("port", PROXY_CFG.get("port", 8080))))
+    parser.add_argument("--host", default=str(GW.get("host", PROXY_CFG.get("host", "127.0.0.1"))))
+    parser.add_argument("--db", default=str(DB_FILE))
     args = parser.parse_args()
-    
-    proxy_port = CONFIG['proxy']['port']
-    mcp_port = CONFIG['mcp']['port']
-    
-    if args.mode == 'proxy':
-        logger.info(f"Starting Proxy HTTP on port {proxy_port}")
-        uvicorn.run(app, host=CONFIG['proxy']['host'], port=proxy_port)
-    
-    elif args.mode == 'mcp-stdio':
-        logger.info("Starting MCP Server (stdio)")
-        mcp.run(transport='stdio')
-    
-    elif args.mode == 'mcp-sse':
-        logger.info(f"Starting MCP Server (SSE) on port {mcp_port}")
-        mcp.run(transport='sse')
 
-    elif args.mode == 'mcp-http':
-        # Streamable HTTP: transport standard des clients MCP recents
-        # (Claude Code, MCP Inspector, SDK 1.10+). SSE reste disponible
-        # via --mode mcp-sse pour les clients legacy.
-        logger.info(f"Starting MCP Server (Streamable HTTP) on port {mcp_port} -> /mcp")
-        mcp.run(transport='streamable-http')
-    
-    elif args.mode == 'all':
-            logger.info(f"Starting IcyCache in full mode")
-            logger.info(f"  Proxy HTTP: http://localhost:{proxy_port}")
-            logger.info(f"  MCP SSE:    http://localhost:{mcp_port}/sse")
-            logger.info(f"  MCP stdio:  Disponible via Claude Desktop")
-        
-            import threading
-            import uvicorn
-            import time
-            import sys
-        
-            def run_proxy():
-                uvicorn.run(app, host=CONFIG['proxy']['host'], port=proxy_port, log_level='warning')
-        
-            def run_mcp_sse():
-                import os
-                os.environ["MCP_SSE_PORT"] = str(mcp_port)
-                mcp.run(transport='sse')
-        
-            def run_with_restart(target, name):
-                """Wrapper qui redémarre le thread si il crash."""
-                while True:
-                    try:
-                        logger.info(f"Starting {name}...")
-                        target()
-                    except SystemExit as e:
-                        # uvicorn quitte via sys.exit(1) si le bind echoue (ex: WinError 10048).
-                        # Relancer en boucle serait inutile: on s'arrete et on le dit.
-                        logger.error(f"{name} exited (code={e.code}); port deja occupe ? pas de restart")
-                        break
-                    except Exception as e:
-                        logger.error(f"{name} crashed: {e}, restarting in 5s...")
-                        time.sleep(5)
-                    else:
-                        logger.info(f"{name} stopped cleanly")
-                        break
-        
-            proxy_thread = threading.Thread(target=run_with_restart, args=(run_proxy, "Proxy HTTP"), daemon=True)
-            mcp_thread = threading.Thread(target=run_with_restart, args=(run_mcp_sse, "MCP SSE"), daemon=True)
-        
-            proxy_thread.start()
-            mcp_thread.start()
-        
-            # Keep main thread alive, monitor threads
-            _dead_logged = set()
-            try:
-                while True:
-                    time.sleep(10)
-                    if not proxy_thread.is_alive() and "proxy" not in _dead_logged:
-                        _dead_logged.add("proxy")
-                        logger.warning("Proxy thread stopped (voir erreur ci-dessus), pas de restart")
-                    if not mcp_thread.is_alive() and "mcp" not in _dead_logged:
-                        _dead_logged.add("mcp")
-                        logger.warning("MCP SSE thread stopped (voir erreur ci-dessus), pas de restart")
-            except KeyboardInterrupt:
-                logger.info("Shutdown requested")
-                sys.exit(0)
-
-
+    logging_level = CONFIG.get("logging", {}).get("level", "INFO")
+    import logging
+    logging.basicConfig(level=getattr(logging, logging_level, logging.INFO),
+                        format="%(asctime)s - IcyCache.gateway - %(levelname)s - %(message)s")
+    print(f"IcyCache gateway  ->  http://{args.host}:{args.port}")
+    print(f"  upstreams       :  {', '.join(_upstream_names())}")
+    print(f"  default         :  {DEFAULT_UPSTREAM or '(aucun - explicite obligatoire)'}")
+    print(f"  websocket       :  ws://{args.host}:{args.port}/ws/events")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

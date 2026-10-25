@@ -83,11 +83,73 @@
           "args": ["pwsh-exec@1.0.1"],
           "cache": false
         },
-        "time": {
-          "command": "{PYTHON}",
-          "args": ["{PROJECT_ROOT}/src/server.py", "--mode", "mcp-stdio"],
-          "cache": false,
-          "_note": "{PYTHON} = venv du projet. Un 'python' nu resolvait vers C:\\Python314 (sans fastapi/mcp) et le serveur demarrait en erreur."
+        "filesystem": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:\\\\", "C:\\\\Users\\\\Tech\\\\AppData\\\\Local\\\\hermes"],
+          "cache": false
+        },
+        "websearch": {
+          "command": "uvx",
+          "args": ["mcp-server-brave-search@2026.10.10"],
+          "env": {
+            "BRAVE_API_KEY": "@hermes:mcp_servers.brave"
+          },
+          "cache": true
+        },
+        "sqlite": {
+          "command": "uvx",
+          "args": ["mcp-server-sqlite@2026.10.10", "D:\\\\IcyCache\\\\db\\\\cache.db"],
+          "cache": true
+        },
+        "docker": {
+          "command": "uvx",
+          "args": ["mcp-server-docker@2026.10.10"],
+          "cache": false
+        },
+        "postgres": {
+          "command": "uvx",
+          "args": ["mcp-server-postgres@2026.10.10"],
+          "env": {
+            "POSTGRES_CONNECTION_STRING": "@hermes:mcp_servers.postgres"
+          },
+          "cache": false
+        },
+        "redis": {
+          "command": "uvx",
+          "args": ["mcp-server-redis@2026.10.10"],
+          "env": {
+            "REDIS_URL": "@hermes:mcp_servers.redis"
+          },
+          "cache": true
+        },
+        "kubernetes": {
+          "command": "uvx",
+          "args": ["mcp-server-kubernetes@2026.10.10"],
+          "cache": false
+        },
+        "aws": {
+          "command": "uvx",
+          "args": ["mcp-server-aws@2026.10.10"],
+          "env": {
+            "AWS_PROFILE": "@hermes:mcp_servers.aws"
+          },
+          "cache": false
+        },
+        "gcp": {
+          "command": "uvx",
+          "args": ["mcp-server-gcp@2026.10.10"],
+          "env": {
+            "GCP_PROJECT": "@hermes:mcp_servers.gcp"
+          },
+          "cache": false
+        },
+        "azure": {
+          "command": "uvx",
+          "args": ["mcp-server-azure@2026.10.10"],
+          "env": {
+            "AZURE_SUBSCRIPTION_ID": "@hermes:mcp_servers.azure"
+          },
+          "cache": false
         }
       }
     },

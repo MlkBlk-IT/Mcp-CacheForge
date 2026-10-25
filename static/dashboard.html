@@ -729,7 +729,7 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
   <aside class="side">
     <div class="brand">
       <div class="logo-wrap">
-        <svg viewBox="0 0 64 64" aria-label="CacheForge logo">
+        <svg viewBox="0 0 64 64" aria-label="IcyCache logo">
           <defs>
             <linearGradient id="lgEdge" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0%" stop-color="#00ffff"/><stop offset="30%" stop-color="#00ffff"/>
@@ -828,7 +828,7 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
         <span class="rl">MCP Server</span><b class="rv c-lime" id="r-mcp">—</b>
         <span class="rs"><i class="status-dot" id="r-mcp-dot"></i><span id="r-mcp-s">checking…</span></span>
       </div>
-      <div class="rail-row" data-tip="<b>Upstream</b>The LLM backend behind the proxy. CacheForge sits in front of it and answers first whenever it can.">
+      <div class="rail-row" data-tip="<b>Upstream</b>The LLM backend behind the proxy. IcyCache sits in front of it and answers first whenever it can.">
         <span class="rl">Upstream</span><b class="rv c-cyan" id="r-up">—</b>
         <span class="rs"><i class="status-dot" id="r-up-dot"></i><span id="r-up-s">checking…</span></span>
       </div>
@@ -1158,12 +1158,12 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
 <div class="help-scrim" id="help-scrim" onclick="toggleHelp(false)"></div>
 <aside class="help-panel" id="help">
   <div class="help-head">
-    <h2>CacheForge Help</h2>
+    <h2>IcyCache Help</h2>
     <button onclick="toggleHelp(false)" title="Close">✕</button>
   </div>
   <div class="help-body">
     <div class="help-sec">
-      <h4>What is CacheForge</h4>
+      <h4>What is IcyCache</h4>
       <p>An <b>async HTTP proxy</b> that sits between your client and a local LLM. It normalizes the prompt, hashes it, and serves the stored answer <b>instantly</b> instead of burning CPU and tokens again.</p>
       <p>Everything stays on this machine — no cloud, no paid API.</p>
     </div>
@@ -1216,7 +1216,7 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
 <script>
 'use strict';
 /* ==================================================================
-   CacheForge Console v4 — neon dashboard
+   IcyCache Console v4 — neon dashboard
    ================================================================== */
 const $ = id => document.getElementById(id);
 const fmt = v => (v === null || v === undefined || v === '') ? '—' : Number(v).toLocaleString('en-US');
@@ -1234,6 +1234,24 @@ function fmtK(v){
   return n.toLocaleString('en-US');
 }
 const esc = s => (s === null || s === undefined || s === '') ? '—' : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Le serveur renvoie deja l'heure LOCALE (SQLite datetime(ts,'localtime')).
+// Ne PAS ajouter 'Z' ici : l'heure locale serait reinterpretée comme UTC et
+// chaque evenement decale de -4h (EDT) / -5h (EST). Un 'Z' eventuel reste
+// traite comme de l'UTC.
+const fmtLocalTs = s => {
+  if (!s) return '—';
+  const str = String(s);
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z)?$/);
+  if (!m) return str;
+  const p = n => String(n).padStart(2, '0');
+  if (m[7]) {                       // marqueur UTC -> heure locale du navigateur
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+    if (isNaN(d.getTime())) return str;
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+           p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+  return m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5] + ':' + m[6];
+};
 const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const S = {
@@ -1281,7 +1299,7 @@ function go(v){
 document.querySelectorAll('.nav-btn').forEach(b => b.onclick = () => go(b.dataset.v));
 
 /* ==================== CLOCK ==================== */
-function tickClock(){ $('clock').textContent = new Date().toLocaleTimeString('en-GB', {hour12:false}); }
+function tickClock(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); $('clock').textContent = d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds())+' (local)'; }
 setInterval(tickClock, 1000); tickClock();
 
 /* ==================== ANIMATED NUMBERS + FLASH ==================== */
@@ -1939,7 +1957,7 @@ function applyMetrics(m){
     // recent table
     const kindTag = k => '<span class="tag t-' + ((k || '').includes('HIT') ? 'hit' : (k || '').includes('BYPASS') ? 'bypass' : 'miss') + '">' + esc(k) + '</span>';
     $('m-body').innerHTML = m.recent.length ? m.recent.map(e =>
-      '<tr><td class="hash">' + esc(e.ts) + '</td><td>' + kindTag(e.kind) + '</td><td>' + esc(e.model) + '</td>'
+      '<tr><td class="hash">' + esc(fmtLocalTs(e.ts)) + '</td><td>' + kindTag(e.kind) + '</td><td>' + esc(e.model) + '</td>'
       + '<td class="num">' + fmt(e.in) + '</td><td class="num">' + fmt(e.out) + '</td><td class="num">' + fmt(e.tks_decode ?? e.tks) + '</td>'
       + '<td class="num">' + fmt(e.latency_ms) + ' ms</td><td class="num c-lime">' + (e.saved ? fmt(e.saved) : '—') + '</td></tr>').join('')
       : '<tr><td colspan="8" class="empty">No requests yet</td></tr>';
@@ -2017,7 +2035,9 @@ async function loadStatus(){
   try{
     const st = await (await fetch('/api/status')).json();
     S.status = st;
-    const mcp = st.mcp || {}, up = st.upstream || {};
+    const mcp = st.mcp || {}, upAll = st.upstream || {};
+    /* /api/status renvoie un dict {nom_upstream: {alive,...}} : on lit l'upstream par defaut. */
+    const up = (upAll.alive !== undefined) ? upAll : (upAll[(st.gateway || {}).default_upstream] || {});
     $('r-mcp').textContent = mcp.alive ? 'ONLINE' : 'DOWN';
     $('r-mcp-dot').className = 'status-dot ' + (mcp.alive ? 'on' : 'off');
     $('r-mcp-s').textContent = mcp.alive
@@ -2148,11 +2168,11 @@ function renderModelCards(){
 /* ==================== EXPORT / LOGS / CLEAR ==================== */
 function exportJSON(){
   const data = {exported_at:new Date().toISOString(), range:S.RANGE, stats:S.stats, metrics:S.metrics, series:S.series, status:S.status, models:S.models, cache:S.cache};
-  download(JSON.stringify(data, null, 2), 'cacheforge_export_' + Date.now() + '.json');
+  download(JSON.stringify(data, null, 2), 'icycache_export_' + Date.now() + '.json');
   toast('Export JSON downloaded');
 }
 function exportCache(){
-  download(JSON.stringify(S.cache || [], null, 2), 'cacheforge_cache_' + Date.now() + '.json');
+  download(JSON.stringify(S.cache || [], null, 2), 'icycache_cache_' + Date.now() + '.json');
   toast('Cache exported');
 }
 function download(content, name){
@@ -2164,7 +2184,7 @@ function openLogs(){ window.open('/api/dashboard-stats', '_blank'); toast('API p
 async function clearCache(){
   if (!confirm('Wipe the ENTIRE cache? This cannot be undone.')) return;
   try{
-    const r = await fetch('/api/cache-clear', {method:'POST', headers:{'X-CacheForge-Confirm':'FORCE_DELETE'}});
+    const r = await fetch('/api/cache-clear', {method:'POST', headers:{'X-IcyCache-Confirm':'FORCE_DELETE'}});
     const d = await r.json();
     toast(d.message || d.detail || 'Done');
     loadStats(); loadMetrics();

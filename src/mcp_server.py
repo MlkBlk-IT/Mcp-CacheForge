@@ -27,136 +27,60 @@ from mcp.server.fastmcp import FastMCP
 from tqdm import tqdm
 
 # === CONFIGURATION ===
-PROJECT_ROOT = Path(r"D:\IcyCache")
+# Racine du projet derivee du fichier: le code doit fonctionner quel que soit
+# l'emplacement du dossier (D:\IcyCache, un clone, un chemin reseau, Linux...).
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_FILE = PROJECT_ROOT / "config" / "icycache.json"
-DB_FILE = Path(os.environ.get("ICYCACHE_DB") or (PROJECT_ROOT / "db" / "cache.db"))
-LOG_FILE = Path(os.environ.get("ICYCACHE_LOG") or (PROJECT_ROOT / "logs" / "app.log"))
+# Les noms historiques CACHEFORGE_* restent acceptes (compatibilite annoncee
+# dans le README): sans cela, les harnais d'isolation anciens ecrivaient dans
+# la base de production au lieu de leur base temporaire.
+DB_FILE = Path(os.environ.get("ICYCACHE_DB") or os.environ.get("CACHEFORGE_DB")
+               or (PROJECT_ROOT / "db" / "cache.db"))
+LOG_FILE = Path(os.environ.get("ICYCACHE_LOG") or os.environ.get("CACHEFORGE_LOG")
+                or (PROJECT_ROOT / "logs" / "app.log"))
 
 # Chargement de la configuration
 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
     CONFIG = json.load(f)
-if os.environ.get("ICYCACHE_TARGET"):  # tests isoles: upstream factice
-    CONFIG['proxy']['target_provider'] = os.environ["ICYCACHE_TARGET"]
+_TARGET = os.environ.get("ICYCACHE_TARGET") or os.environ.get("CACHEFORGE_TARGET")
+if _TARGET:  # tests isoles: upstream factice
+    CONFIG['proxy']['target_provider'] = _TARGET
 
-# Configuration du logging
+# Configuration du logging — JAMAIS sur stdout.
+# Le transport stdio MCP utilise stdout pour JSON-RPC: ecrire des logs dedans corrompt
+# le protocole et tue la connexion. stderr + fichier seulement. De plus on force l'UTF-8
+# avec errors='replace': sous Windows la console est cp1252 et un caractere '✓' fait
+# planter le processus avec UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if _stream is not None and (_stream.encoding or "").lower().replace("-", "") != "utf8":
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 logging.basicConfig(
     level=getattr(logging, CONFIG['logging']['level']),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(LOG_FILE, encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
+        logging.StreamHandler(sys.stderr),
     ]
 )
 logger = logging.getLogger("IcyCache")
 
-# === MOTEUR DE NORMALISATION PAR PIPELINE (RIGOUREUX & RAPIDE) ===
-class NormalizationPipeline:
-    """Pipeline de normalisation multi-couches pour maximiser le cache hit rate"""
-    
-    def __init__(self, rules_path: Path):
-        with open(rules_path, 'r', encoding='utf-8') as f:
-            self.config = json.load(f)
-        
-        # Couche 1: Aho-Corasick pour remplacement multi-patterns
-        try:
-            import ahocorasick
-            self.automaton = ahocorasick.Automaton()
-            for rule in self.config['rules']:
-                pattern = rule['pattern'].lower()
-                replacement = rule['replace']
-                self.automaton.add_word(pattern, (pattern, replacement))
-            self.automaton.make_automaton()
-            print(f"✓ Aho-Corasick chargé: {len(self.config['rules'])} patterns")
-        except ImportError:
-            print("⚠ ahocorasick non disponible, fallback regex")
-            self.automaton = None
-            self.regex_compiled = []
-            for rule in self.config['rules']:
-                pattern = re.compile(r'\b' + re.escape(rule['pattern'].lower()) + r'\b', re.IGNORECASE)
-                self.regex_compiled.append((pattern, rule['replace']))
-        
-        # Couche 2: Stemmers Snowball
-        try:
-            from nltk.stem.snowball import SnowballStemmer
-            self.stemmer_fr = SnowballStemmer('french')
-            self.stemmer_en = SnowballStemmer('english')
-            print("✓ Stemmers NLTK chargés")
-        except ImportError:
-            print("⚠ nltk non disponible, stemming désactivé")
-            self.stemmer_fr = None
-            self.stemmer_en = None
-        
-        # Couche 3: NFKD normalization
-        import unicodedata
-        self.unicodedata = unicodedata
-        
-        # Regex pour nettoyage final
-        self.cleanup_regex = re.compile(r'[^\w\s]', re.UNICODE)
-        self.space_regex = re.compile(r'\s+')
-    
-    def normalize(self, text: str) -> str:
-        """Pipeline complet: NFKD → Lowercase → Aho-Corasick → Strip accents → Stemming → Cleanup"""
-        
-        # Étape 1: NFKD normalization (normalise les caractères Unicode)
-        text = self.unicodedata.normalize('NFKD', text)
-        
-        # Étape 2: Lowercase
-        text = text.lower()
-        
-        # Étape 3: Aho-Corasick ou Regex pour remplacement multi-patterns
-        if self.automaton:
-            # Aho-Corasick: remplacement optimal
-            def _isw(c):
-                return c.isalnum() or c == '_' or self.unicodedata.category(c) == 'Mn'
-            cands = []
-            for end_idx, (pattern, replacement) in self.automaton.iter(text):
-                s, e = end_idx - len(pattern) + 1, end_idx + 1
-                if s > 0 and _isw(pattern[0]) and _isw(text[s - 1]):
-                    continue
-                if e < len(text) and _isw(pattern[-1]) and _isw(text[e]):
-                    continue
-                cands.append((s, e, replacement))
-            # leftmost-longest, sans chevauchement
-            cands.sort(key=lambda t: (t[0], -(t[1] - t[0])))
-            out, pos = [], 0
-            for s, e, rep in cands:
-                if s < pos:
-                    continue
-                out.append(text[pos:s])
-                out.append(rep)
-                pos = e
-            out.append(text[pos:])
-            text = ''.join(out)
-        else:
-            # Fallback regex
-            for pattern, replacement in self.regex_compiled:
-                text = pattern.sub(replacement, text)
-        
-        # Étape 4: Strip accents (garde seulement les caractères de base)
-        text = ''.join(
-            c for c in self.unicodedata.normalize('NFD', text)
-            if self.unicodedata.category(c) != 'Mn'
-        )
-        
-        # Étape 5: Stemming (optionnel, peut être trop agressif)
-        # Désactivé pour l'instant car peut casser la sémantique
-        # if self.stemmer_fr:
-        #     words = text.split()
-        #     # Détection simple de langue
-        #     if any(word in ['le', 'la', 'les', 'un', 'une', 'des'] for word in words):
-        #         text = ' '.join(self.stemmer_fr.stem(w) for w in words)
-        #     else:
-        #         text = ' '.join(self.stemmer_en.stem(w) for w in words)
-        
-        # Étape 6: Cleanup final (supprime ponctuation, normalise espaces)
-        text = self.cleanup_regex.sub('', text)
-        text = self.space_regex.sub(' ', text).strip()
-        
-        return text
-    
-    def get_hash(self, normalized_text: str) -> str:
-        """Génère le hash SHA256 du texte normalisé"""
-        return hashlib.sha256(normalized_text.encode('utf-8')).hexdigest()
+# === PROXY D'OUTILS (tool cache + garde anti-boucle) ===
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import tool_proxy as tp
+    TOOL_PROXY_OK = True
+    logger.info("tool_proxy charge: %s serveur(s) routable(s)", len(tp.server_names()))
+except Exception:
+    tp = None
+    TOOL_PROXY_OK = False
+    logger.warning("tool_proxy INDISPONIBLE: %s", __import__("traceback").format_exc())
+
+# Normalisation : moteur UNIQUE partage avec la gateway (src/server.py).
+import icy_normalize
 
 
 class CacheManager:
@@ -285,7 +209,7 @@ class CacheManager:
         logger.warning("CACHE CLEARED")
 
 # === INITIALISATION DES COMPOSANTS ===
-normalizer = NormalizationPipeline(PROJECT_ROOT / 'config' / 'normalization_rules.json')
+normalizer = icy_normalize.get_default_normalizer()
 cache = CacheManager(DB_FILE)
 
 def _init_events():
@@ -330,8 +254,28 @@ mcp = FastMCP(
 
 @mcp.tool()
 def get_cache_stats() -> Dict[str, Any]:
-    """Retourne les statistiques du cache"""
-    return cache.get_stats()
+    """Retourne les statistiques du cache (hits/misses reels lus dans la table events)"""
+    stats = cache.get_stats()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            kinds = dict(conn.execute("SELECT kind, COUNT(*) FROM events GROUP BY kind").fetchall())
+            sp, sc = conn.execute("SELECT COALESCE(SUM(saved_prompt),0), COALESCE(SUM(saved_completion),0) FROM events").fetchone()
+        finally:
+            conn.close()
+        hits, misses = kinds.get("HIT", 0), kinds.get("MISS", 0)
+        total = sum(kinds.values())
+        stats["requests_hits"] = hits
+        stats["requests_misses"] = misses
+        stats["requests_bypass"] = kinds.get("BYPASS", 0)
+        stats["requests_total"] = total
+        # meme denominateur que /api/metrics (src/server.py) : hits / total.
+        stats["hit_rate_pct"] = round(100.0 * hits / total, 1) if total else None
+        stats["tokens_saved_in"] = sp
+        stats["tokens_saved_out"] = sc
+    except Exception as exc:
+        stats["events_error"] = str(exc)
+    return stats
 
 @mcp.tool()
 def clear_cache(confirm: str) -> str:
@@ -381,8 +325,141 @@ def search_cached_prompts(query: str, limit: int = 10) -> list:
     conn.close()
     return results
 
+
+# === OUTILS DU PROXY D'OUTILS MCP (tool cache + garde anti-boucle) ===
+
+@mcp.tool()
+async def proxy_tool(server: str, tool: str, args: dict = None, client: str = "hermes") -> dict:
+    """Appelle un outil MCP via le proxy IcyCache (cache + garde anti-boucle).
+
+    Routage: Hermes -> IcyCache -> serveur MCP cible (stdio) -> resultat.
+    Cache: cle = hash(serveur, outil, args). Une reponse en cache est renvoyee telle
+    quelle, sans re-executer l'outil (latence ~0, economie = saved_latency_ms).
+    Boucle: meme outil + memes args + memes resultats => bloque par ToolLoopGuard.
+
+    Args:
+        server: nom du serveur (voir list_proxy_servers)
+        tool: nom de l'outil a executer
+        args: arguments de l'outil (dict JSON), optionnel
+        client: identifiant de l'appelant (session agent), optionnel
+
+    Returns:
+        {"ok": true, "cached": false, "latency_ms": 12, "result": ...}
+        {"ok": true, "cached": true, "latency_ms": 0, "saved_latency_ms": 840, "result": ...}
+    """
+    if not TOOL_PROXY_OK:
+        return {"ok": False, "error": "tool_proxy indisponible (voir logs/app.log)"}
+    return await tp.call_tool(server, tool, args, client)
+
+
+@mcp.tool()
+async def proxy_tools(calls: list, client: str = "hermes") -> list:
+    """Appel batch de plusieurs outils MCP via le proxy IcyCache.
+
+    Args:
+        calls: liste de [{"server": "..", "tool": "..", "args": {...}}, ...]
+        client: identifiant de l'appelant, optionnel
+
+    Returns:
+        liste des resultats dans le meme ordre (format identique a proxy_tool)
+    """
+    if not TOOL_PROXY_OK:
+        return [{"ok": False, "error": "tool_proxy indisponible"}]
+    return await tp.batch_call(calls or [], client)
+
+
+@mcp.tool()
+def list_proxy_servers() -> dict:
+    """Liste les serveurs MCP routables via le proxy IcyCache."""
+    if not TOOL_PROXY_OK:
+        return {"ok": False, "error": "tool_proxy indisponible"}
+    names = tp.server_names()
+    return {"ok": True, "servers": names, "count": len(names)}
+
+
+@mcp.tool()
+async def list_proxy_tools(server: str) -> dict:
+    """Liste les outils exposes par un serveur MCP cible (ex: 'github', 'fetch').
+
+    Args:
+        server: nom du serveur (voir list_proxy_servers)
+    """
+    if not TOOL_PROXY_OK:
+        return {"ok": False, "error": "tool_proxy indisponible"}
+    return await tp.list_server_tools(server)
+
+
+@mcp.tool()
+def get_tool_cache_stats() -> dict:
+    """Statistiques du cache d'outils (tool_cache) et des evenements (agent_events)."""
+    if not TOOL_PROXY_OK:
+        return {"ok": False, "error": "tool_proxy indisponible"}
+    return tp.stats()
+
+
+@mcp.tool()
+def clear_tool_cache(confirm: str) -> dict:
+    """Vide le cache d'outils (necessite confirm='FORCE_DELETE')."""
+    if not TOOL_PROXY_OK:
+        return {"ok": False, "error": "tool_proxy indisponible"}
+    if confirm != "FORCE_DELETE":
+        return {"ok": False, "error": "ECHEC: utilisez confirm='FORCE_DELETE' pour valider."}
+    return tp.clear_cache()
+
+
+@mcp.tool()
+async def check_tool_loop(messages: list, warn_after: int = 3, max_cycle: int = 3) -> dict:
+    """Detecte une boucle d'agent dans l'historique de messages (appels d'outils repetee).
+
+    Args:
+        messages: historique de messages (format OpenAI)
+        warn_after: seuil d'alerte (defaut 3)
+        max_cycle: longueur maximale du cycle detecte (defaut 3)
+
+    Returns:
+        {"ok": true, "loop": false} ou {"ok": true, "loop": true, "warning": {...}}
+    """
+    if not TOOL_PROXY_OK:
+        return {"ok": False, "error": "tool_proxy indisponible"}
+    hit = tp.llm_messages_guard(messages, warn_after=warn_after, max_cycle=max_cycle)
+    if hit:
+        return {"ok": True, "loop": True, "warning": hit}
+    return {"ok": True, "loop": False}
+
 # === PROXY HTTP ===
 app = FastAPI(title="IcyCache Proxy", version="1.0.0")
+
+# === STATIC FILES (dashboard assets: three.min.js, icywebgl.js, refs) ===
+try:
+    from fastapi.staticfiles import StaticFiles
+    _static_dir = PROJECT_ROOT / "static"
+    if _static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+except Exception as _e:
+    logging.warning(f"static mount failed: {_e}")
+
+# Serve js/assets at root too (dashboard.html references them relatively)
+# Cache-Control: no-store — ces fichiers sont edites en place pendant le
+# developpement ; sans cet en-tete, le navigateur garde l'ancienne version en
+# cache et les correctifs JS n'apparaissent jamais.
+_ASSET_HEADERS = {"Cache-Control": "no-store, must-revalidate"}
+
+@app.get("/three.min.js")
+async def _three():
+    return FileResponse(str(PROJECT_ROOT / "static" / "three.min.js"),
+                        media_type="application/javascript", headers=_ASSET_HEADERS)
+
+@app.get("/icywebgl.js")
+async def _icywebgl():
+    return FileResponse(str(PROJECT_ROOT / "static" / "icywebgl.js"),
+                        media_type="application/javascript", headers=_ASSET_HEADERS)
+
+@app.get("/{asset}.png")
+async def _png(asset: str):
+    p = PROJECT_ROOT / "static" / f"{asset}.png"
+    if p.exists():
+        return FileResponse(str(p), media_type="image/png", headers=_ASSET_HEADERS)
+    raise HTTPException(status_code=404)
 
 # Champs sans effet sur la sortie. Tout le reste entre dans la clé de cache.
 CACHE_KEY_IGNORED = {"stream", "stream_options", "user"}
@@ -402,6 +479,23 @@ async def proxy_chat(request: Request):
     messages = body.get('messages', [])
     if not any(m.get('role') == 'user' for m in messages):
         raise HTTPException(status_code=400, detail="No user message found")
+
+    # GARDE ANTI-BOUcle (LLM): detecte les repetitions d'appels d'outils dans l'historique.
+    # Ne bloque pas la requete: injecte un message system qui casse la boucle.
+    if TOOL_PROXY_OK:
+        try:
+            _loop = tp.llm_messages_guard(messages)
+            if _loop:
+                _warn = _loop.get("warning", _loop) if isinstance(_loop, dict) else _loop
+                logger.warning("LOOP GUARD: %s", _warn)
+                messages = list(messages) + [{
+                    "role": "system",
+                    "content": ("[IcyCache] Boucle detectee: " + str(_warn) +
+                                " Variez les arguments ou arretez d'appeler cet outil."),
+                }]
+                body["messages"] = messages
+        except Exception:
+            logger.exception("llm_messages_guard")
 
     cache_payload = {k: v for k, v in body.items() if k not in CACHE_KEY_IGNORED}
     
@@ -734,6 +828,10 @@ async def health_check():
     """Endpoint de santé"""
     return {
         'status': 'healthy',
+        # Identité du projet: permet à un lanceur de détecter qu'une AUTRE
+        # version (ex: l'ancien D:\CacheForge) occupe déjà le port.
+        'service': 'IcyCache',
+        'project_root': str(PROJECT_ROOT),
         'cache_stats': cache.get_stats(),
         'target_provider': CONFIG['proxy']['target_provider']
     }
@@ -752,9 +850,57 @@ def _tcp_alive(host: str, port: int, timeout: float = 0.7) -> tuple:
 def _mcp_tool_names() -> list:
     """Noms des outils MCP exposes (introspection, repli statique)."""
     try:
-        return sorted(mcp._tool_manager._tools.keys())
+        tm = getattr(mcp, "_tool_manager", None)
+        if tm is not None:
+            # list_tools() est l'API publique du ToolManager; on evite le dict
+            # prive _tools qui casse a chaque mise a jour du SDK MCP.
+            names = [getattr(t, "name", None) for t in tm.list_tools()]
+            names = [n for n in names if n]
+            if names:
+                return sorted(names)
     except Exception:
-        return ["clear_cache", "get_cache_stats", "normalize_preview", "search_cached_prompts"]
+        logger.debug("introspection des outils MCP impossible", exc_info=True)
+    return ["check_tool_loop", "clear_cache", "clear_tool_cache", "get_cache_stats",
+            "get_tool_cache_stats", "list_proxy_servers", "list_proxy_tools",
+            "normalize_preview", "proxy_tool", "proxy_tools", "search_cached_prompts"]
+
+
+@app.get("/api/tools")
+async def api_list_tools():
+    """Serveurs MCP routables via le proxy IcyCache."""
+    if not TOOL_PROXY_OK:
+        return JSONResponse({"ok": False, "error": "tool_proxy indisponible"}, status_code=503)
+    names = tp.server_names()
+    return {"ok": True, "servers": names, "count": len(names)}
+
+
+@app.get("/api/tools/{server}")
+async def api_list_server_tools(server: str):
+    """Outils exposes par un serveur MCP cible."""
+    if not TOOL_PROXY_OK:
+        return JSONResponse({"ok": False, "error": "tool_proxy indisponible"}, status_code=503)
+    return await tp.list_server_tools(server)
+
+
+@app.post("/api/tools/call")
+async def api_call_tool(request: Request):
+    """Appelle un outil MCP via le proxy (body: {server, tool, args, client})."""
+    if not TOOL_PROXY_OK:
+        return JSONResponse({"ok": False, "error": "tool_proxy indisponible"}, status_code=503)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}")
+    return await tp.call_tool(body.get("server"), body.get("tool"),
+                              body.get("args") or {}, body.get("client"))
+
+
+@app.get("/api/tools/stats")
+async def api_tool_cache_stats():
+    """Statistiques du cache d'outils."""
+    if not TOOL_PROXY_OK:
+        return JSONResponse({"ok": False, "error": "tool_proxy indisponible"}, status_code=503)
+    return tp.stats()
 
 
 @app.get("/api/status")
@@ -794,10 +940,14 @@ async def dashboard_stats():
     cursor.execute("SELECT prompt_hash, model, normalized_prompt, access_count, datetime(created_at, 'localtime') FROM cache ORDER BY last_accessed DESC LIMIT 50")
     prompts = [{"hash": r[0][:8] + "...", "model": r[1], "normalized_prompt": r[2][:80] + ("..." if len(r[2]) > 80 else ""), "access_count": r[3], "created_at": r[4]} for r in cursor.fetchall()]
     conn.close()
-    return {"stats": cache.get_stats(), "target_provider": CONFIG["proxy"]["target_provider"], "prompts": prompts}
+    # no-store: sans cet en-tete le navigateur ressert un payload perime et le
+    # dashboard affiche des compteurs figes (0) alors que la base a des donnees.
+    return JSONResponse(
+        {"stats": cache.get_stats(), "target_provider": CONFIG["proxy"]["target_provider"], "prompts": prompts},
+        headers={"Cache-Control": "no-store, must-revalidate"})
 
-@app.get("/api/metrics")
-async def api_metrics():
+def _metrics_snapshot():
+    """Instantane des compteurs. Source unique pour /api/metrics et /api/live."""
     conn = sqlite3.connect(DB_FILE)
     ok = "kind!='HIT' AND completion_tokens>0 AND latency_ms>0"
     r = conn.execute(f"""SELECT COUNT(*), COALESCE(SUM(kind='HIT'),0), COALESCE(SUM(kind='MISS'),0),
@@ -832,9 +982,14 @@ async def api_metrics():
             "tks_last": next((x["tks"] for x in recent if x["tks"]), None),
             "events_without_usage": no_usage, "recent": recent}
 
-@app.get("/api/metrics/series")
-async def api_metrics_series(bucket: str = "hour", hours: int = 24):
-    """Série temporelle (graphe dashboard) + agrégat par modèle sur la même fenêtre. Buckets en heure locale."""
+
+@app.get("/api/metrics")
+async def api_metrics():
+    return JSONResponse(_metrics_snapshot(), headers={"Cache-Control": "no-store, must-revalidate"})
+
+
+def _series_snapshot(bucket: str = "hour", hours: int = 24):
+    """Serie temporelle + agregat par modele. Source unique partagee."""
     hours = max(1, min(int(hours), 720))
     fmt = '%Y-%m-%d %H:%M' if bucket == "min" else '%Y-%m-%d %H:00'
     bucket = "min" if bucket == "min" else "hour"
@@ -854,6 +1009,64 @@ async def api_metrics_series(bucket: str = "hour", hours: int = 24):
     return {"bucket": bucket, "hours": hours,
             "points": [{"t": p[0], "hits": p[1], "misses": p[2], "bypass": p[3], "saved": p[4], "spent": p[5]} for p in pts],
             "models": [{"model": m[0], "requests": m[1], "hits": m[2], "saved": m[3], "spent": m[4]} for m in mdl]}
+
+
+@app.get("/api/metrics/series")
+async def api_metrics_series(bucket: str = "hour", hours: int = 24):
+    """Serie temporelle (graphe dashboard) + agregat par modele sur la meme fenetre. Buckets en heure locale."""
+    return _series_snapshot(bucket, hours)
+
+
+@app.get("/api/live")
+async def api_live(request: Request, bucket: str = "hour", hours: int = 24):
+    """Flux temps reel (SSE) des metriques IcyCache.
+
+    Le dashboard ne se contente plus d'un polling toutes les 5 s : chaque
+    nouvel evenement proxy est pousse ici en moins d'une seconde, ce qui
+    rend les compteurs, le grafe 3D et le neurone reellement vivants.
+
+    Le client se reconnecte tout seul si la connexion tombe (EventSource).
+    """
+    async def gen():
+        last_sig = None
+        last_ping = time.time()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    snap = _metrics_snapshot()
+                    sig = (snap["requests"], snap["hits"], snap["misses"], snap["bypass"],
+                           snap["tokens_in_saved"], snap["tokens_out_saved"],
+                           snap["tokens_in_spent"], snap["tokens_out_spent"])
+                    now = time.time()
+                    if sig != last_sig:
+                        last_sig = sig
+                        payload = {"ts": now, "metrics": snap}
+                        try:
+                            payload["series"] = _series_snapshot(bucket, hours)
+                        except Exception:
+                            pass
+                        yield f"data: {json.dumps(payload)}\n\n"
+                    elif now - last_ping > 12:
+                        last_ping = now
+                        yield ": keepalive\n\n"
+                except Exception as exc:
+                    yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+                    await asyncio.sleep(2)
+                    continue
+                await asyncio.sleep(0.7)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-store, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    })
+
 
 @app.get("/api/metrics/export")
 async def api_metrics_export(since: str = "", limit: int = 10000):
@@ -885,8 +1098,14 @@ async def api_metrics_export(since: str = "", limit: int = 10000):
 
 @app.post("/api/cache-clear")
 async def api_clear_cache(request: Request):
-    """Vide le cache via API (exige l'en-tete X-IcyCache-Confirm: FORCE_DELETE)"""
-    if request.headers.get('x-icycache-confirm') != 'FORCE_DELETE':
+    """Vide le cache via API (exige X-IcyCache-Confirm: FORCE_DELETE).
+
+    L'ancien nom X-CacheForge-Confirm reste accepte (le dashboard n'a pas encore
+    ete renomme) : les deux entetes sont traitees a l'identique.
+    """
+    confirm = (request.headers.get('x-icycache-confirm')
+               or request.headers.get('x-cacheforge-confirm'))
+    if confirm != 'FORCE_DELETE':
         raise HTTPException(status_code=403, detail="Missing header X-IcyCache-Confirm: FORCE_DELETE")
     cache.clear()
     return {"message": "Cache vidé avec succès", "success": True}
@@ -896,7 +1115,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="IcyCache Server")
-    parser.add_argument('--mode', choices=['proxy', 'mcp-stdio', 'mcp-sse', 'all'], 
+    parser.add_argument('--mode', choices=['proxy', 'mcp-stdio', 'mcp-sse', 'mcp-http', 'all'],
                        default='all', help="Mode de démarrage")
     
     args = parser.parse_args()
@@ -915,6 +1134,13 @@ if __name__ == "__main__":
     elif args.mode == 'mcp-sse':
         logger.info(f"Starting MCP Server (SSE) on port {mcp_port}")
         mcp.run(transport='sse')
+
+    elif args.mode == 'mcp-http':
+        # Streamable HTTP: transport standard des clients MCP recents
+        # (Claude Code, MCP Inspector, SDK 1.10+). SSE reste disponible
+        # via --mode mcp-sse pour les clients legacy.
+        logger.info(f"Starting MCP Server (Streamable HTTP) on port {mcp_port} -> /mcp")
+        mcp.run(transport='streamable-http')
     
     elif args.mode == 'all':
             logger.info(f"Starting IcyCache in full mode")
@@ -941,6 +1167,11 @@ if __name__ == "__main__":
                     try:
                         logger.info(f"Starting {name}...")
                         target()
+                    except SystemExit as e:
+                        # uvicorn quitte via sys.exit(1) si le bind echoue (ex: WinError 10048).
+                        # Relancer en boucle serait inutile: on s'arrete et on le dit.
+                        logger.error(f"{name} exited (code={e.code}); port deja occupe ? pas de restart")
+                        break
                     except Exception as e:
                         logger.error(f"{name} crashed: {e}, restarting in 5s...")
                         time.sleep(5)
@@ -955,13 +1186,16 @@ if __name__ == "__main__":
             mcp_thread.start()
         
             # Keep main thread alive, monitor threads
+            _dead_logged = set()
             try:
                 while True:
                     time.sleep(10)
-                    if not proxy_thread.is_alive():
-                        logger.warning("Proxy thread died, will restart via wrapper")
-                    if not mcp_thread.is_alive():
-                        logger.warning("MCP SSE thread died, will restart via wrapper")
+                    if not proxy_thread.is_alive() and "proxy" not in _dead_logged:
+                        _dead_logged.add("proxy")
+                        logger.warning("Proxy thread stopped (voir erreur ci-dessus), pas de restart")
+                    if not mcp_thread.is_alive() and "mcp" not in _dead_logged:
+                        _dead_logged.add("mcp")
+                        logger.warning("MCP SSE thread stopped (voir erreur ci-dessus), pas de restart")
             except KeyboardInterrupt:
                 logger.info("Shutdown requested")
                 sys.exit(0)

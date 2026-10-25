@@ -12,6 +12,6 @@
   "build": {
     "type": "python",
     "command": "python -m pip install -e .",
-    "run": "python src/server.py --mode mcp-sse"
+    "run": "python src/mcp_server.py --mode mcp-sse"
   }
 }

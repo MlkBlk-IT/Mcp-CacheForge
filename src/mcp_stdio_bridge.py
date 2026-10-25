@@ -2,7 +2,7 @@
 """IcyCache - pont stdio pour le serveur MCP.
 
 Probleme : en transport MCP stdio, stdout EST le canal JSON-RPC. Or le serveur
-historique (src/server.py) ecrit des `print()` de demarrage ET configure son
+historique (src/mcp_server.py) ecrit des `print()` de demarrage ET configure son
 logging sur sys.stdout. Chaque ligne non-JSON pollue le flux protocole :
 les clients MCP stricts echouent, et les permissifs loguent des erreurs.
 
@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parent
-TARGET = SRC_DIR / "server.py"
+TARGET = SRC_DIR / "mcp_server.py"
 
 
 class _StdoutToStderr:
@@ -67,7 +67,7 @@ def main() -> None:
                 pass
 
     if not TARGET.exists():
-        print(f"[IcyCache] server.py introuvable : {TARGET}", file=sys.stderr)
+        print(f"[IcyCache] mcp_server.py introuvable : {TARGET}", file=sys.stderr)
         sys.exit(2)
 
     real_stdout = sys.stdout

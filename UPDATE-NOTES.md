@@ -1,7 +1,7 @@
 # IcyCache — Notes de mise à jour (2026-10-24)
 
 ## Ajouts
-- Nouvelle gateway universelle `src/server_new.py` (port 8080) avec noyau partagé `src/icy_core.py`
+- Nouvelle gateway universelle `src/server.py` (port 8080) avec noyau partagé `src/icy_core.py`
 - Normalisation autonome `src/icy_normalize.py`, store de cache `src/icy_cache_store.py`
 - Façade MCP `src/mcp_gateway.py`, pont stdio `src/mcp_stdio_bridge.py`
 - Proxy d'outils MCP `src/tool_proxy.py`, helpers upstream `src/upstream_utils.py`

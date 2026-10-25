@@ -18,4 +18,4 @@ Write-Host "[*] Logs: D:\CacheForge\logs\app.log" -ForegroundColor Gray
 Write-Host "[*] DB:   D:\CacheForge\db\cache.db" -ForegroundColor Gray
 Write-Host ""
 
-python "$ProjectRoot\src\server.py"
+python "$ProjectRoot\src\mcp_server.py"

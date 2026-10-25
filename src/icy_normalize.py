@@ -33,6 +33,10 @@ DEFAULT_RULES_PATH = PROJECT_ROOT / "config" / "normalization_rules.json"
 # Champs sans effet sur la sortie du modele : exclus de la cle de cache.
 CACHE_KEY_IGNORED = {"stream", "stream_options", "user", "metadata"}
 
+# Bloc volatil injecte par Hermes en fin de message ("Retrieved skills (top-K relevant ...)").
+# Il change a chaque requete et empeche tout HIT : retire de la CLE uniquement.
+_VOLATILE_TAIL = re.compile(r"retrieved skills\W*top\W?k relevant to your query.*$", re.DOTALL)
+
 
 def canonical(obj: Any) -> str:
     """JSON canonique (cles triees, separateurs compacts) -> hachage stable."""
@@ -48,7 +52,9 @@ class Normalizer:
         self.automaton = None
         self.regex_compiled = []
         self.unicodedata = unicodedata
-        self.cleanup_regex = re.compile(r"[^\w\s]", re.UNICODE)
+        # Ne supprime que la ponctuation de phrase. +-*/=<>%^&|()[]{} etc. sont conserves :
+        # "12+2" et "1+22" ne doivent PAS partager la meme cle de cache.
+        self.cleanup_regex = re.compile(r"[!?.,;:'\"`\u00b4\u201c\u201d\u2018\u2019\u00ab\u00bb\u00a1\u00bf\u2026]", re.UNICODE)
         self.space_regex = re.compile(r"\s+")
 
         if self.rules_path.exists():
@@ -82,7 +88,8 @@ class Normalizer:
             c for c in self.unicodedata.normalize("NFD", text) if self.unicodedata.category(c) != "Mn"
         )
         text = self.cleanup_regex.sub("", text)
-        return self.space_regex.sub(" ", text).strip()
+        text = self.space_regex.sub(" ", text).strip()
+        return _VOLATILE_TAIL.sub("", text).strip()
 
     def _replace_rules(self, text: str) -> str:
         if self.automaton:

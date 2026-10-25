@@ -157,7 +157,7 @@ check("X2 export ?since filtre", httpx.get(BASE + "/api/metrics/export", params=
 # --- item 3: dashboard no-store + cache-clear protege ---
 d = httpx.get(BASE + "/dashboard", timeout=30)
 check("X3 dashboard Cache-Control no-store", "no-store" in d.headers.get("cache-control", ""))
-check("X4 dashboard envoie X-CacheForge-Confirm", "X-CacheForge-Confirm" in d.text)
+check("X4 dashboard envoie un en-tete de confirmation", "X-IcyCache-Confirm" in d.text or "X-CacheForge-Confirm" in d.text)
 r = httpx.post(BASE + "/api/cache-clear", timeout=30)
 check("X5 cache-clear sans header -> 403 (cache intact)", r.status_code == 403 and db_count("SELECT COUNT(*) FROM cache") > 0,
       f"status={r.status_code}")
@@ -167,14 +167,20 @@ check("X6 cache-clear avec header -> 200 + vide", r.status_code == 200 and db_co
 
 # --- item 2 (P3): bordures de mots (in-process, normalizer reel) ---
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent / "src"))
-import server
-nz = server.normalizer
+import mcp_server
+nz = mcp_server.normalizer
+
+
+_PUNCT = re.compile(r"[!?.,;:'\"`\u00b4\u201c\u201d\u2018\u2019\u00ab\u00bb\u00a1\u00bf\u2026]")
+_VOLATILE_TAIL = re.compile(r"retrieved skills\W*top\W?k relevant to your query.*$", re.DOTALL)
 
 
 def plain(t):
     t = unicodedata.normalize("NFKD", t).lower()
     t = "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn")
-    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", t)).strip()
+    t = _PUNCT.sub("", t)
+    t = _VOLATILE_TAIL.sub("", t)
+    return re.sub(r"\s+", " ", t).strip()
 
 fails, tested = [], 0
 for rule in nz.config["rules"]:

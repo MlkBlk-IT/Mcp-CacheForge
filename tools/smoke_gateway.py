@@ -86,7 +86,7 @@ def main() -> int:
     env["PYTHONPATH"] = str(SRC)
 
     print(f"Gateway de test -> port {args.port} | base {db_path}")
-    proc = subprocess.Popen([sys.executable, str(SRC / "server_new.py"), "--port", str(args.port)],
+    proc = subprocess.Popen([sys.executable, str(SRC / "server.py"), "--port", str(args.port)],
                             env=env, cwd=str(PROJECT_ROOT),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     base = f"http://127.0.0.1:{args.port}"

@@ -108,6 +108,13 @@ def init_db():
     for c, t in EVENT_NEW_COLS.items():
         if c not in cols:
             conn.execute("ALTER TABLE events ADD COLUMN %s %s" % (c, t))
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        logger.warning("WAL non active (base verrouillee par un autre process)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_created ON cache(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cache_accessed ON cache(last_accessed)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_hash ON events(hash, kind)")
     conn.execute("""CREATE TABLE IF NOT EXISTS agent_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT CURRENT_TIMESTAMP,

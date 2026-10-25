@@ -69,9 +69,13 @@ def main():
             f"Ce n'est pas cette instance ({PROJECT_ROOT}). Arret pour eviter un conflit.")
         return
 
+# server.py = gateway multi-upstream -> :8080 (ex server_new, renomme).
+# mcp_server.py = serveur MCP SSE :8081 / HTTP :8084, importe uniquement pour `mcp`
+# (son ancien proxy FastAPI interne n'est pas servi ici).
     try:
-        from server import app as proxy_app, mcp
-        log("server module importé OK")
+        from server import app as proxy_app  # gateway multi-upstream -> :8080
+        from mcp_server import mcp              # MCP SSE/HTTP -> :8081 / :8084
+        log("server (gateway) + mcp_server (MCP) importes OK")
     except Exception:
         log(f"IMPORT CRASH\n{traceback.format_exc()}")
         return

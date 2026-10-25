@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """CacheForge PrefixProxy v1 - proxy ADDITIF (port 8090) pour le cache de PREFIXE des fournisseurs cloud.
-Ne modifie ni server.py ni cache.db. Ne stocke AUCUNE cle API (transmises telles quelles au fournisseur).
+Ne modifie ni mcp_server.py ni cache.db. Ne stocke AUCUNE cle API (transmises telles quelles au fournisseur).
 
-  Anthropic : ajoute `cache_control` (cache automatique, champ racine) si le client n'a mis aucun cache_control.
+  Anthropic : ajoute `cache_control` au niveau BLOC (system / dernier content), jamais a la racine.
   OpenAI    : ajoute un `prompt_cache_key` stable (hash du prompt systeme) si absent.
   Mesure    : tokens lus / ecrits dans le cache du fournisseur  ->  GET /api/prefix-stats
 
@@ -105,19 +105,62 @@ def usage_from(kind, u):
             "write": d.get("cache_write_tokens") or 0, "out": u.get("completion_tokens") or 0}
 
 
+def _inject_anthropic_cache_control(body):
+    """Pose `cache_control` sur les blocs stables UNIQUEMENT (system + tools), jamais sur le dernier content.
+
+    Raison : le dernier message user peut etre compacte/reecrit par l'agent, ce qui casserait le
+    cache Anthropic (qui invalide TOUT ce qui suit un changement de prefixe). Le system et les tools
+    sont les prefixes les plus stables. On ne pose jamais cache_control sur un message user/assistant."""
+    targets = []
+    sysv = body.get("system")
+    if isinstance(sysv, list):
+        targets = sysv
+    elif isinstance(sysv, str) and sysv.strip():
+        blocks = [{"type": "text", "text": sysv}]
+        body["system"] = blocks
+        targets = blocks
+    if targets and isinstance(targets[-1], dict) and "cache_control" not in targets[-1]:
+        targets[-1]["cache_control"] = {"type": "ephemeral"}
+    # Tools : posent aussi un breakpoint (prefixe stable, max 4 breakpoints Anthropic)
+    for t in body.get("tools") or []:
+        if isinstance(t, dict) and "cache_control" not in t:
+            t["cache_control"] = {"type": "ephemeral"}
+    return bool(targets)
+
+
+def _extract_text(msg):
+    """Extrait le texte d'un message : content str ou liste de blocs (multimodal)."""
+    c = msg.get("content")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return " ".join(b.get("text", "") for b in c if isinstance(b, dict) and "text" in b)
+    return ""
+
+
 def mutate(kind, provider, body):
-    """Active le cache de prefixe cote fournisseur. Retourne le nom du champ injecte (ou None)."""
+    """Active le cache de prefixe cote fournisseur. Retourne le nom du champ injecte (ou None).
+    Anthropic : cache_control au niveau bloc (system/content). Tous les autres (famille
+    OpenAI-compatible : OpenAI, Mistral, DeepSeek, Groq, OpenRouter, omniroute, locaux) :
+    prompt_cache_key stable par session = hash(system + 1er message user + modele). Le 1er user
+    reste stable sur tous les tours d'une conversation, ce qui colle les tours au meme prefix
+    cache cote fournisseur (tokens caches factures ~10% au lieu de 100%)."""
     if kind == "anthropic":
-        if INJECT_ANTHROPIC and "cache_control" not in json.dumps(body):
-            body["cache_control"] = {"type": "ephemeral"}
+        if INJECT_ANTHROPIC and _inject_anthropic_cache_control(body):
             return "cache_control"
-    elif provider == "openai":
+    else:
         if INJECT_OPENAI_KEY and "prompt_cache_key" not in body:
             msgs = body.get("messages") or []
-            sys_txt = next((m.get("content") for m in msgs if m.get("role") in ("system", "developer")), None)
-            if sys_txt:
-                digest = hashlib.sha256(json.dumps(sys_txt, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-                body["prompt_cache_key"] = "cf-" + digest
+            sys_txt = next((_extract_text(m) for m in msgs if m.get("role") in ("system", "developer")), "")
+            first_user = next((_extract_text(m) for m in msgs if m.get("role") == "user"), "")
+            if sys_txt or first_user:
+                model = body.get("model") or ""
+                src = json.dumps({"s": sys_txt, "u": first_user, "m": model},
+                                 sort_keys=True, ensure_ascii=False)
+                digest = hashlib.sha256(src.encode("utf-8")).hexdigest()[:16]
+                body["prompt_cache_key"] = "ic-" + digest
+                # session_id forward : si le client envoie un session_id (sticky routing OpenRouter/omniroute),
+                # on le laisse passer tel quel. Les providers qui ne le connaissent pas l'ignorent (sans danger).
                 return "prompt_cache_key"
     return None
 

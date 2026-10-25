@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""IcyCache - store de cache LLM (compatible avec la table `cache` de server.py).
+"""IcyCache - store de cache LLM (compatible avec la table `cache` de mcp_server.py).
 
-La table `cache` existe deja en base (creee par server.py). Ce module y accede
+La table `cache` existe deja en base (creee par mcp_server.py). Ce module y accede
 sans la recreer ni l'alterer, a part une colonne additive `raw_hash` qui permet
 de savoir si un hit vient d'un payload identique ou d'un payload normalise
 equivalent (transparence pour le dashboard).
@@ -10,7 +10,7 @@ Format de stockage de `response` (v3) :
     {"_v": 3, "kind": "openai", "message": {...}, "usage": {...}, "model": "...",
      "finish_reason": "stop", "sse": "data: ...\\n\\n", "gen_time_ms": 123}
 
-Les entrees v2 (server.py actuel) restent lisibles.
+Les entrees v2 (mcp_server.py) restent lisibles.
 """
 from __future__ import annotations
 

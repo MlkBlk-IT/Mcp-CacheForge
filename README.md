@@ -1,22 +1,21 @@
 > ## ⚠️ NOTICE — The rest of this repository (code, comments, scripts, docs, commits, issues) is written in **French**. Only this README is in English.
-> ⚠️ WORK IN PROGRESS — migration in progress (2026-10-24)
-> IcyCache has been renamed from CacheForge. The **universal multi-upstream gateway** (`src/server_new.py`) is
-> written and tested, but it runs **alongside** `src/server.py`: the swap on port 8080 will happen
-> once the dashboard is finalized, then the two will be unified.
-> - `src/server.py` remains the active service on `:8080` / `:8081` / `:8084` (unchanged, authoritative).
-> - The gateway is ready to start on its own: `python src/server_new.py --port 8090`.
-> - `src/server.py` and `static/dashboard.html` are **not** modified by the gateway.
+> ✅ **SWAP DONE — 2026-10-24.** IcyCache was renamed from CacheForge. The **universal multi-upstream gateway**
+> is now the **single active service on `:8080`**, and the historical server holds the MCP layer.
+> - `src/server.py` → **the gateway** (5 upstreams: omniroute, lmstudio, ollama, openai, anthropic).
+> - `src/mcp_server.py` → **the MCP layer** (SSE `:8081`, Streamable HTTP `:8084`, stdio).
+> - Both start together via `tray.py`; `:8080` is the single entry point for all LLM traffic.
+> - Legacy entry point kept: `python src/server.py --port 8090` for isolated testing.
 >
 > ### Available MCP transports (all three active at once)
 >
 > | Transport | Endpoint | Target client |
 > |-----------|----------|---------------|
-> | **stdio** | `python src/server.py --mode mcp-stdio` | Claude Desktop, IDEs, any stdio client |
+> | **stdio** | `python mcp_stdio.py` | Claude Desktop, IDEs, any stdio client |
 > | **SSE** (legacy) | `http://127.0.0.1:8081/sse` | Hermes, older clients |
 > | **Streamable HTTP** (standard) | `http://127.0.0.1:8084/mcp` | Recent MCP clients, MCP Inspector |
 >
-> In stdio mode, go through `src/mcp_stdio_bridge.py`: it reserves stdout for JSON-RPC.
-> (Nothing is written to stdout anymore, but the bridge remains the safety net.)
+> In stdio mode, go through `mcp_stdio.py`: it reserves stdout for JSON-RPC.
+> (Nothing is written to stdout anymore, but the wrapper remains the safety net.)
 
 # 🔥 IcyCache — Universal LLM Gateway with local cache
 
@@ -52,7 +51,7 @@ and **a single entry point** for all LLM traffic.
               │
               ▼
 ┌───────────────────────────────────────────────────────────────────────┐
-│  ICYCACHE GATEWAY  127.0.0.1:8080   (src/server_new.py)              │
+│  ICYCACHE GATEWAY  127.0.0.1:8080   (src/server.py)                   │
 │                                                                       │
 │  ROUTING      URL prefix  /<upstream>/v1/...                          │
 │               header      X-IcyCache-Upstream: lmstudio               │
@@ -83,14 +82,14 @@ OmniRoute is no longer the entry point: it is **one upstream among others**.
 
 | File | Role |
 |------|------|
-| `src/server_new.py` | **Universal multi-upstream gateway** (FastAPI): routing, cache, real tokens, WebSocket |
+| `src/server.py` | **Universal multi-upstream gateway** (FastAPI): routing, cache, real tokens, WebSocket |
 | `src/mcp_gateway.py` | **MCP facade** of the gateway: 7 tools, tool-cache, loop guard, mirror REST API |
 | `src/icy_core.py` | Shared core: DB (`events`, `agent_events`, `tool_cache`), WebSocket hub, loop guard |
 | `src/icy_normalize.py` | Standalone normalization engine (faithful port, no import side effects) |
 | `src/icy_cache_store.py` | LLM cache store (compatible `cache` table, additive `raw_hash` column) |
 | `src/upstream_utils.py` | Usage normalization, headers, cache_control/prompt_cache_key mutation, SSE meter |
 | `src/mcp_stdio_bridge.py` | stdio bridge: reserves stdout for MCP JSON-RPC, logs and prints to stderr |
-| `src/server.py` | Legacy service (active on :8080/:8081) — **will be unified with the gateway** |
+| `src/mcp_server.py` | **MCP server** (FastMCP): tools, tool-cache, loop guard — listens on :8081 (SSE) / :8084 (HTTP) |
 | `config/icycache.gateway.json` | Gateway config: upstreams, cache, loop guard, tool cache |
 | `config/normalization_rules.json` | 1114 normalization rules |
 | `tools/smoke_gateway.py` | **Real** multi-upstream smoke test (isolated ports, temp DB) |
@@ -152,7 +151,7 @@ is still accepted by the gateway for compatibility.
 
 ## MCP tools (facade)
 
-### Legacy server (`src/server.py`) — 11 tools
+### MCP server (`src/mcp_server.py`) — 11 tools
 
 | Tool | Role |
 |------|------|
@@ -242,7 +241,7 @@ and checks that only IcyCache remains reachable.
 
 ## Environment variables (unified naming)
 
-| Variable | Role | Old name (still read by `src/server.py` for `ICYCACHE_*`) |
+| Variable | Role | Old name (still read by `src/mcp_server.py` for `ICYCACHE_*`) |
 |----------|------|----------------------------------------------------------|
 | `ICYCACHE_DB` | Cache DB path | `CACHEFORGE_DB` |
 | `ICYCACHE_LOG` | Log path | `CACHEFORGE_LOG` |

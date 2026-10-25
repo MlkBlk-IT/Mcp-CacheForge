@@ -116,8 +116,8 @@ def main():
         stub = subprocess.Popen([PY, os.path.abspath(__file__), "--stub"], env=env,
                                 stdout=open(os.path.join(tmp, "stub.out"), "w"), stderr=subprocess.STDOUT)
         procs.append(stub)
-        code = ("import sys; sys.path.insert(0, r'%s'); import server, uvicorn; "
-                "uvicorn.run(server.app, host='127.0.0.1', port=%d, log_level='warning')"
+        code = ("import sys; sys.path.insert(0, r'%s'); import mcp_server, uvicorn; "
+                "uvicorn.run(mcp_server.app, host='127.0.0.1', port=%d, log_level='warning')"
                 % (os.path.join(ROOT, "src"), SP))
         srv = subprocess.Popen([PY, "-c", code], env=env, cwd=ROOT,
                                stdout=open(os.path.join(tmp, "server.out"), "w"), stderr=subprocess.STDOUT)

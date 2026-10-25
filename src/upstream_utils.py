@@ -36,19 +36,63 @@ def usage_from(kind, u):
             "cached_tokens": d.get("cached_tokens") or 0, "cache_write_tokens": d.get("cache_write_tokens") or 0}
 
 
+def _inject_anthropic_cache_control(body):
+    """Pose `cache_control` sur les blocs stables UNIQUEMENT (system + tools), jamais sur le dernier content.
+
+    Anthropic n'accepte `cache_control` que sur un bloc de contenu : un
+    `cache_control` racine fait rejeter la requete (400 extra inputs).
+    On cible UNIQUEMENT le system et les tools (prefixes stables) — jamais le
+    dernier message user/assistant, qui peut etre reecrit par la compaction et
+    invalider tout le cache Anthropic (invalidation en cascade du prefixe)."""
+    system = body.get("system")
+    if isinstance(system, str) and system.strip():
+        body["system"] = [{"type": "text", "text": system,
+                           "cache_control": {"type": "ephemeral"}}]
+    elif isinstance(system, list) and system:
+        last = system[-1]
+        if isinstance(last, dict) and "cache_control" not in last:
+            last["cache_control"] = {"type": "ephemeral"}
+    # Tools : posent aussi un breakpoint (prefixe stable, max 4 breakpoints Anthropic)
+    for t in body.get("tools") or []:
+        if isinstance(t, dict) and "cache_control" not in t:
+            t["cache_control"] = {"type": "ephemeral"}
+    return bool(system or body.get("tools"))
+
+
+def _extract_text(msg):
+    """Extrait le texte d'un message : content str ou liste de blocs (multimodal)."""
+    c = msg.get("content")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return " ".join(b.get("text", "") for b in c if isinstance(b, dict) and "text" in b)
+    return ""
+
+
 def mutate(kind, upstream, body):
-    """Active le cache de prefixe cote fournisseur. Retourne le nom du champ injecte (ou None)."""
+    """Active le cache de prefixe cote fournisseur. Retourne le nom du champ injecte (ou None).
+    Anthropic : cache_control au niveau bloc (system/content). Tous les autres (famille
+    OpenAI-compatible : OpenAI, Mistral, DeepSeek, Groq, OpenRouter, omniroute, locaux) :
+    prompt_cache_key stable par session = hash(system + 1er message user + modele). Le 1er user
+    reste stable sur tous les tours d'une conversation, ce qui colle les tours au meme prefix
+    cache cote fournisseur (tokens caches factures ~10% au lieu de 100%)."""
     if kind == "anthropic":
         if INJECT_ANTHROPIC and "cache_control" not in json.dumps(body):
-            body["cache_control"] = {"type": "ephemeral"}
-            return "cache_control"
-    elif upstream == "openai":
+            if _inject_anthropic_cache_control(body):
+                return "cache_control"
+    else:
         if INJECT_OPENAI_KEY and "prompt_cache_key" not in body:
             msgs = body.get("messages") or []
-            sys_txt = next((m.get("content") for m in msgs if m.get("role") in ("system", "developer")), None)
-            if sys_txt:
-                digest = hashlib.sha256(json.dumps(sys_txt, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+            sys_txt = next((_extract_text(m) for m in msgs if m.get("role") in ("system", "developer")), "")
+            first_user = next((_extract_text(m) for m in msgs if m.get("role") == "user"), "")
+            if sys_txt or first_user:
+                model = body.get("model") or ""
+                src = json.dumps({"s": sys_txt, "u": first_user, "m": model},
+                                 sort_keys=True, ensure_ascii=False)
+                digest = hashlib.sha256(src.encode("utf-8")).hexdigest()[:16]
                 body["prompt_cache_key"] = "ic-" + digest
+                # session_id forward : si le client envoie un session_id (sticky routing OpenRouter/omniroute),
+                # on le laisse passer tel quel. Les providers qui ne le connaissent pas l'ignorent (sans danger).
                 return "prompt_cache_key"
     return None
 

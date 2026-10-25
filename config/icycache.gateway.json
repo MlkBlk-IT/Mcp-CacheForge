@@ -13,7 +13,7 @@
     "host": "127.0.0.1",
     "port": 8083,
     "transport": ["stdio", "sse"],
-    "_note": "Serveur MCP de la gateway. 8081 reste au serveur historique (server.py) jusqu'a l'unification."
+    "_note": "Serveur MCP de la gateway. 8081 est servi par mcp_server.py (serveur MCP)."
   },
   "gateway": {
     "host": "127.0.0.1",
