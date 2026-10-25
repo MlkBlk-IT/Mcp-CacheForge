@@ -718,6 +718,69 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
 })();
 </script>
 <script src="icywebgl.js"></script>
+<style id=wow>body::after{content:'';position:fixed;inset:-15%;z-index:-1;pointer-events:none;background:radial-gradient(38% 32% at 18% 18%,rgba(0,229,255,.17),transparent 70%),radial-gradient(34% 30% at 82% 26%,rgba(169,139,255,.15),transparent 70%),radial-gradient(40% 34% at 58% 92%,rgba(255,95,210,.10),transparent 70%);filter:blur(34px);animation:wowaur 24s ease-in-out infinite alternate}
+@keyframes wowaur{to{transform:translate3d(3%,-2%,0) scale(1.08)}}
+#wowspot{position:fixed;left:0;top:0;width:620px;height:620px;border-radius:50%;pointer-events:none;z-index:0;background:radial-gradient(closest-side,rgba(0,229,255,.11),rgba(169,139,255,.05) 55%,transparent);mix-blend-mode:screen;will-change:transform}
+.glass{transition:box-shadow .35s,border-color .35s,transform .35s}
+.glass:hover{background-image:radial-gradient(460px circle at var(--mx,50%) var(--my,50%),rgba(0,229,255,.10),transparent 60%)}
+.v,.val,.big,.tc-v,.rv{text-shadow:0 0 26px currentColor}
+.wowpop{animation:wowpop .75s ease-out}
+@keyframes wowpop{0%{transform:scale(1.14);filter:brightness(1.9)}100%{transform:none;filter:none}}
+.top{position:relative}
+.top::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,var(--ice),var(--pink),var(--gold),transparent);background-size:200% 100%;animation:wowline 7s linear infinite;opacity:.8}
+@keyframes wowline{to{background-position:-200% 0}}
+.main{padding:22px 28px 40px}
+.side{overflow-y:auto;scrollbar-width:none}
+.side-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.side .pills{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0}
+.side .refr{display:flex;align-items:center;gap:6px;margin:4px 0}
+.side .kv{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0}
+.side .kv .glass{padding:7px 10px}
+.side .kv .val{font-size:15px}
+@media(min-width:1200px){.grid.tiles{grid-auto-rows:minmax(92px,auto)}.tiles .t-node{grid-column:span 2;grid-row:span 1;padding:14px 18px}.tiles .t-node .v{font-size:clamp(30px,3.2vw,44px)}.tiles .t-saved,.tiles .t-pct{grid-column:span 2}.tiles .t-tks{display:none}.grid.split{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}}
+.tile-dots{display:none}
+.t-saved #saved-in,.t-saved #saved-out{display:inline-block;font-size:14px;margin-right:14px}
+.globe-card{display:block;position:relative}
+.globe-stage{position:relative;width:100%;height:clamp(400px,54vh,560px);background:none!important;border:0!important;box-shadow:none!important;border-radius:0!important;overflow:visible!important}
+.globe-stage canvas{width:100%;height:100%;display:block;background:transparent!important;filter:drop-shadow(0 0 40px rgba(0,229,255,.42))}
+.globe-stage::before{content:'';position:absolute;inset:6%;border-radius:50%;background:radial-gradient(closest-side,rgba(0,229,255,.17),rgba(169,139,255,.08) 55%,transparent 74%)!important;border:0!important;animation:wowbreath 5s ease-in-out infinite;pointer-events:none}
+@keyframes wowbreath{50%{transform:scale(1.09);opacity:.65}}
+.globe-side{display:none}
+.gtool{position:absolute;left:12px;top:50%;bottom:auto;transform:translateY(-50%);z-index:4;display:flex;flex-direction:column;flex-wrap:nowrap;gap:5px;padding:8px;border-radius:16px;background:rgba(6,12,26,.42);border:1px solid rgba(0,229,255,.2);backdrop-filter:blur(14px);opacity:.5;transition:opacity .25s}
+.gtool .hud-btn{padding:5px 9px;font-size:10px;white-space:nowrap;text-align:left}
+.globe-stage:hover .gtool{opacity:1}
+.globe-hud{position:absolute!important;left:50%!important;bottom:10px!important;transform:translateX(-50%);z-index:3}
+.globe-stage .inspector{position:absolute;top:12px;right:12px;z-index:4;max-width:250px;opacity:0;transform:translateY(-6px);transition:opacity .25s,transform .25s;pointer-events:none}
+.globe-stage:hover .inspector{opacity:1;transform:none}
+.gdet{margin:10px 4px 2px}
+.gdet summary{cursor:pointer;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted)}
+.loop-hud{display:flex;flex-wrap:wrap;gap:5px;max-height:0;opacity:0;overflow:hidden;transition:max-height .35s,opacity .3s}
+.ring-wrap:hover .loop-hud{max-height:140px;opacity:1}
+.tkpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:15px;margin-bottom:15px}
+.tkpis .glass{padding:14px 16px}
+.tkpis .k{font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);font-weight:800}
+.tkpis .val{font-size:26px;font-weight:800;margin-top:6px;font-variant-numeric:tabular-nums;color:var(--ice)}
+#tk-hits,#tk-lat{color:var(--green)}
+#tk-err{color:var(--red)}
+#tk-mb{color:var(--violet)}
+.tgrid{display:grid;grid-template-columns:1.4fr 1fr;gap:15px;margin-bottom:15px}
+.trow{display:grid;grid-template-columns:120px 1fr 44px 70px;gap:10px;align-items:center;font-size:11.5px;margin:8px 0;font-family:var(--mono);color:var(--muted)}
+.tbar{height:8px;border-radius:5px;background:rgba(238,250,255,.07);overflow:hidden}
+.tbar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--ice),var(--violet));box-shadow:0 0 12px rgba(0,229,255,.5)}
+.trow b{color:var(--ink);text-align:right}
+.ttbl{max-height:46vh;overflow:auto;font-family:var(--mono);font-size:11px}
+.tr{display:grid;grid-template-columns:70px 64px 1fr 76px 72px 78px;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(90,190,255,.08);align-items:center;color:var(--muted)}
+.tr:hover{background:rgba(0,229,255,.05)}
+.tr.th{color:var(--dim);font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;position:sticky;top:0;background:rgba(8,14,30,.92);z-index:1}
+.tk-tool_call,.tk-tool_hit,.tk-tool_error{padding:2px 8px;border-radius:9px;font-size:9.5px;font-weight:800;letter-spacing:.8px;text-align:center}
+.tk-tool_call{color:var(--ice);background:rgba(0,229,255,.1)}
+.tk-tool_hit{color:var(--green);background:rgba(61,255,160,.12)}
+.tk-tool_error{color:var(--red);background:rgba(255,77,109,.15)}
+.cli-claude{color:var(--gold)}
+.cli-hermes{color:var(--violet)}
+.tchips{margin-left:auto;display:flex;gap:6px}
+.tnote{font-size:10.5px;color:var(--dim);margin-top:12px;line-height:1.5}
+@media(max-width:1199px){.tkpis{grid-template-columns:repeat(2,1fr)}.tgrid{grid-template-columns:1fr}}.glass h3{justify-content:flex-start}.glass h3 .ln{order:3}.glass h3 .badge{order:2}.glass h3 .tchips{order:4}.rail-row{padding:6px 11px!important}.rail-row .spark{height:14px!important}.side-foot{display:none}.brand-txt span{font-size:8px!important;letter-spacing:1px!important;white-space:nowrap}.act-btn{padding:7px 8px!important;font-size:11px!important}.side .refr label{display:none}.side .kv .glass{padding:5px 9px}</style>
 </head>
 <body>
 <canvas id="bgfx"></canvas>
@@ -885,8 +948,10 @@ td .count{color:var(--amber);font-weight:800;font-family:var(--mono)}
         <div class="glass t-saved" id="card-saved" data-tip="<b>Tokens Saved</b>Prompt + completion tokens skipped because the answer was already cached.">
           <h3><span class="ln"></span>Tokens Saved</h3>
           <div class="v c-lime" id="saved-total">—</div>
-          <div class="sub" id="saved-sub">—</div>
-          <div class="sub live-save idle" id="saved-live">waiting for the first hit…</div>
+                <div class="v c-cyan" id="saved-in">—</div>
+                <div class="v c-pink" id="saved-out">—</div>
+                <div class="sub" id="saved-sub">—</div>
+                <div class="sub live-save idle" id="saved-live">waiting for the first hit…</div>
           <div class="meter m-lime"><i id="bar-saved"></i></div>
         </div>
         <div class="glass t-pct" id="card-pct" data-tip="<b>% Saved</b>Share of all tokens that never had to be generated.">
@@ -1863,6 +1928,10 @@ function applyMetrics(m){
     const saved = (m.tokens_in_saved || 0) + (m.tokens_out_saved || 0);
     const spent = (m.tokens_in_spent || 0) + (m.tokens_out_spent || 0);
 
+    animNum('saved-in', m.tokens_in_saved, true);
+    $('saved-in').textContent = fmt(m.tokens_in_saved);
+    animNum('saved-out', m.tokens_out_saved, true);
+    $('saved-out').textContent = fmt(m.tokens_out_saved);
     animNum('saved-total', saved, true);
     $('saved-sub').textContent = 'in ' + fmt(m.tokens_in_saved) + ' · out ' + fmt(m.tokens_out_saved);
     setMeter('bar-saved', saved / Math.max(1, saved + spent));
@@ -1932,6 +2001,14 @@ function applyMetrics(m){
       if (tcSub){
         tcSub.classList.add('hit');
         tcSub.textContent = 'last save +' + fmt(delta) + ' tok';
+      }
+    }
+    /* clear idle state if we already have saved tokens (initial load) */
+    if (saved > 0) {
+      const live = $('saved-live');
+      if (live && live.classList.contains('idle')) {
+        live.classList.remove('idle');
+        live.textContent = '⚡ saved ' + fmt(saved) + ' tokens';
       }
     }
     if (S.lastHitRate !== null && m.hit_rate_pct > S.lastHitRate){
@@ -2261,5 +2338,48 @@ setTimeout(() => {
   showNodeInfo(null);
 }, 300);
 </script>
+<script id=wowjs>(function(){try{
+var q=function(s,r){return (r||document).querySelector(s)},qa=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+var side=q('.side'),acts=q('.side-actions'),sp=q('.spacer',side),anchor=sp||acts,pills=q('.top .pills'),refr=q('.top .refr'),gs=q('.globe-side'),kv=q('.kv',gs),gc=q('.gctl',gs),stage=q('.globe-stage'),card=q('.globe-card');
+if(side&&anchor){var sep=document.createElement('div');sep.className='sep';sep.innerHTML='<span>System</span><i></i>';side.insertBefore(sep,anchor);[kv,pills,refr].forEach(function(e){if(e)side.insertBefore(e,anchor)})}
+var re=q('#r-entries');if(re&&re.closest){var rr=re.closest('.rail-row');if(rr)rr.style.display='none'}
+if(stage&&gc){gc.className+=' gtool';stage.appendChild(gc)}
+var ins=q('#node-menu');if(stage&&ins)stage.appendChild(ins);
+if(card&&gs){var d=document.createElement('details');d.className='gdet';d.innerHTML='<summary>Details / legend / cell stats</summary>';[q('#cell-stats'),q('.globe-legend',gs),q('.sub',gs)].forEach(function(e){if(e)d.appendChild(e)});card.insertBefore(d,gs)}
+var spot=document.createElement('div');spot.id='wowspot';document.body.appendChild(spot);
+document.addEventListener('pointermove',function(e){spot.style.transform='translate3d('+(e.clientX-310)+'px,'+(e.clientY-310)+'px,0)';var g=e.target.closest&&e.target.closest('.glass');if(g){var r=g.getBoundingClientRect();g.style.setProperty('--mx',(e.clientX-r.left)+'px');g.style.setProperty('--my',(e.clientY-r.top)+'px')}},{passive:true});
+var fire=function(){var b=q('[data-g=pulse]');if(b)b.click()};
+var t=q('#r-saved'),last=t&&t.textContent;if(t)new MutationObserver(function(){var v=t.textContent;if(v!==last&&last&&last.charCodeAt(0)!==8212)fire();last=v}).observe(t,{childList:true,characterData:true,subtree:true});
+var cv=q('#globe');if(cv)cv.addEventListener('dblclick',fire);
+setTimeout(function(){var z=q('[data-g=zin]');if(z){}},1600);
+var pop=function(el){el.classList.remove('wowpop');void el.offsetWidth;el.classList.add('wowpop')};
+['entries','saved-total','m-pct','tc-val','ov-hr','ov-req','ov-hits','ov-miss','r-hr','r-saved','r-tks'].forEach(function(id){var e=q('#'+id);if(!e)return;var l=e.textContent;new MutationObserver(function(){var v=e.textContent;if(v!==l){l=v;pop(e)}}).observe(e,{childList:true,characterData:true,subtree:true})});
+var main=q('.main'),mb=q('.nav-btn[data-v=models]');
+if(main&&mb){
+var kp=function(id,l){return '<div class=glass><div class=k>'+l+'</div><div class=val id='+id+'>-</div></div>'};
+var sec=document.createElement('section');sec.className='view';sec.id='v-tools';
+sec.innerHTML='<div class=tkpis>'+kp('tk-calls','Tool calls')+kp('tk-hits','Cache hits')+kp('tk-err','Errors')+kp('tk-lat','Latency saved')+kp('tk-mb','Payload')+'</div><div class=tgrid><div class=glass><h3><span class=ln></span>By server</h3><div id=tk-srv></div></div><div class=glass><h3><span class=ln></span>By client</h3><div id=tk-cli></div><div class=tnote>Only MCP tool calls routed through IcyCache appear here (client = who called). Chat LLM tokens never pass through this proxy.</div></div></div><div class=glass><h3><span class=ln></span>Recent calls<span class=tchips id=tk-f></span></h3><div class=ttbl id=tk-tbl></div></div>';
+main.appendChild(sec);
+var nb=document.createElement('button');nb.className='nav-btn';nb.setAttribute('data-v','tools');nb.setAttribute('data-tip','<b>Tools</b>MCP tool calls routed through IcyCache: who called, which tool, latency, errors, cache hits.');nb.innerHTML='<span class=ico>&#9881;</span><span class=lbl>Tools</span><span class=cnt id=n-tools>0</span>';
+mb.parentNode.insertBefore(nb,mb.nextSibling);
+var flt='all',data=[],stats={};
+var st=function(id,v){var e=q('#'+id);if(e)e.textContent=v};
+var esc=function(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return c==='&'?'&amp;':c==='<'?'&lt;':'&gt;'})};
+var tm=function(ts){var x=new Date(String(ts).replace(' ','T')+'Z');return isNaN(x)?String(ts):x.toTimeString().slice(0,8)};
+var by=function(key){var m={};data.forEach(function(e){var k=e[key]||'-';var o=m[k]||(m[k]={n:0,ms:0});o.n++;o.ms+=e.latency_ms||0});return Object.keys(m).map(function(k){return {k:k,n:m[k].n,avg:Math.round(m[k].ms/m[k].n)}}).sort(function(a,b){return b.n-a.n})};
+var bars=function(arr){var mx=arr.length?arr[0].n:1;return arr.slice(0,8).map(function(o){return '<div class=trow><span>'+esc(o.k)+'</span><div class=tbar><i style=width:'+Math.max(4,Math.round(o.n/mx*100))+'%></i></div><b>'+o.n+'</b><span>'+o.avg+' ms</span></div>'}).join('')};
+var lbl={tool_call:'CALL',tool_hit:'HIT',tool_error:'ERR'};
+var render=function(){var s=stats,c=function(k){return s[k]&&s[k].count||0};
+st('tk-calls',c('tool_call'));st('tk-hits',c('tool_hit'));st('tk-err',c('tool_error'));st('tk-lat',((s.tool_hit&&s.tool_hit.saved_latency_ms||0)/1000).toFixed(1)+' s');st('tk-mb',((s.tool_call&&s.tool_call.bytes||0)/1048576).toFixed(2)+' MB');st('n-tools',c('tool_call'));
+var a=q('#tk-srv'),b=q('#tk-cli');if(a)a.innerHTML=bars(by('server'));if(b)b.innerHTML=bars(by('client'));
+var cl=by('client').map(function(o){return o.k}),names=['all'].concat(cl).concat(['errors']),fb=q('#tk-f');
+if(fb){fb.innerHTML='';names.forEach(function(n){var x=document.createElement('button');x.className='hud-btn'+(n===flt?' on':'');x.textContent=n;x.onclick=function(){flt=n;render()};fb.appendChild(x)})}
+var rows=data.filter(function(e){return flt==='all'||(flt==='errors'?e.kind==='tool_error':e.client===flt)}).slice(0,120);
+var tb=q('#tk-tbl');if(tb)tb.innerHTML='<div class=tr th><b>Time</b><b>Kind</b><b>Server / tool</b><b>Client</b><b>Size</b><b>Latency</b></div>'.replace('tr th','tr th')+rows.map(function(e){return '<div class=tr><span>'+tm(e.ts)+'</span><span class=tk-'+esc(e.kind)+'>'+(lbl[e.kind]||esc(e.kind))+'</span><span>'+esc(e.server)+' / '+esc(e.tool)+'</span><span class=cli-'+esc(e.client)+'>'+esc(e.client)+'</span><span>'+((e.bytes||0)/1024).toFixed(1)+' kB</span><span>'+(e.kind==='tool_hit'?'-'+(e.saved_latency_ms||0):(e.latency_ms||0))+' ms</span></div>'}).join('')};
+var load=function(){Promise.all([fetch('/api/agent-events?limit=300').then(function(r){return r.json()}),fetch('/api/tools/stats').then(function(r){return r.json()})]).then(function(a){data=a[0].events||[];stats=a[1].events||{};render()}).catch(function(){})};
+nb.addEventListener('click',function(){qa('.nav-btn').forEach(function(x){x.classList.remove('on')});qa('.view').forEach(function(x){x.classList.remove('on')});nb.classList.add('on');sec.classList.add('on');var ti=q('#view-title');if(ti)ti.textContent='Tools';load()});
+setInterval(function(){if(sec.classList.contains('on'))load()},4000);load();
+}
+}catch(e){console.warn('wow patch',e)}})();</script>
 </body>
 </html>

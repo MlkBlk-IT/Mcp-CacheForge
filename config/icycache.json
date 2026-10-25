@@ -22,15 +22,15 @@
   },
   "cache": {
       "db_path": "D:\\IcyCache\\db\\cache.db",
-      "max_entries": 10000,
-      "enable_semantic": false,
-      "semantic_threshold": 0.95,
-      "ttl_seconds": 86400
+      "max_entries": 200000,
+      "enable_semantic": true,
+      "semantic_threshold": 0.80,
+      "ttl_seconds": 2592000
     },
     "tool_cache": {
       "enabled": true,
       "ttl_seconds": 3600,
-      "window_seconds": 300,
+      "window_seconds": 1800,
       "tools": {
         "warn_after": 3,
         "block_after": 5,
@@ -75,7 +75,7 @@
           "command": "C:\\AI\\EmbeddingDB\\.venv\\Scripts\\python.exe",
           "args": ["C:\\AI\\EmbeddingDB\\hermes_qdrant_mcp.py"],
           "cache": true,
-          "ttl_seconds": 86400,
+          "ttl_seconds": 259200,
           "_note": "cache: true + detection anti-ecriture: memory_search_tool / hybrid_search_tool / memory_stats_tool sont caches; memory_add_tool / memory_delete_tool / rebuild_bm25_index_tool sont executes a chaque appel."
         },
         "pwsh": {
@@ -98,17 +98,17 @@
         },
         "sqlite": {
           "command": "uvx",
-          "args": ["mcp-server-sqlite@2026.10.10", "D:\\\\IcyCache\\\\db\\\\cache.db"],
+          "args": ["mcp-server-sqlite@2025.4.25", "--db-path", "D:\\IcyCache\\db\\cache.db"],
           "cache": true
         },
         "docker": {
           "command": "uvx",
-          "args": ["mcp-server-docker@2026.10.10"],
+          "args": ["mcp-server-docker@0.3.0"],
           "cache": false
         },
         "postgres": {
           "command": "uvx",
-          "args": ["mcp-server-postgres@2026.10.10"],
+          "args": ["mcp-server-postgres@0.1.0"],
           "env": {
             "POSTGRES_CONNECTION_STRING": "@hermes:mcp_servers.postgres"
           },
@@ -116,7 +116,7 @@
         },
         "redis": {
           "command": "uvx",
-          "args": ["mcp-server-redis@2026.10.10"],
+          "args": ["mcp-server-redis@0.1.1"],
           "env": {
             "REDIS_URL": "@hermes:mcp_servers.redis"
           },
@@ -124,31 +124,7 @@
         },
         "kubernetes": {
           "command": "uvx",
-          "args": ["mcp-server-kubernetes@2026.10.10"],
-          "cache": false
-        },
-        "aws": {
-          "command": "uvx",
-          "args": ["mcp-server-aws@2026.10.10"],
-          "env": {
-            "AWS_PROFILE": "@hermes:mcp_servers.aws"
-          },
-          "cache": false
-        },
-        "gcp": {
-          "command": "uvx",
-          "args": ["mcp-server-gcp@2026.10.10"],
-          "env": {
-            "GCP_PROJECT": "@hermes:mcp_servers.gcp"
-          },
-          "cache": false
-        },
-        "azure": {
-          "command": "uvx",
-          "args": ["mcp-server-azure@2026.10.10"],
-          "env": {
-            "AZURE_SUBSCRIPTION_ID": "@hermes:mcp_servers.azure"
-          },
+          "args": ["mcp-server-kubernetes@0.1.6"],
           "cache": false
         }
       }

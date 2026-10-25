@@ -12,3 +12,6 @@ fix_*.py
 build/
 dist/
 .commit_msg.txt
+
+# Scratch de travail (copies isolées, db, logs, captures) - hors livrable
+scratch/

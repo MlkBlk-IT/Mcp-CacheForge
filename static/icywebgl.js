@@ -690,7 +690,7 @@
     geo.computeVertexNormals();
     const soma = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({
       color: 0x1b6d88, emissive: 0x062633, emissiveIntensity: 1,
-      shininess: 85, specular: 0xbdf3ff, transparent: true, opacity: 0.95
+      shininess: 140, specular: 0xe6fbff, transparent: true, opacity: 0.3, depthWrite: false
     }));
     this.soma = soma;
     this.anatomy.add(soma);
@@ -710,7 +710,7 @@
     /* --- NOYAU + nucleole -------------------------------------------- */
     const nucleus = new THREE.Mesh(
       new THREE.SphereGeometry(R * 0.44, 28, 20),
-      new THREE.MeshBasicMaterial({ color: C.NUCLEUS, transparent: true, opacity: 0.9 })
+      new THREE.MeshBasicMaterial({ color: C.NUCLEUS, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false })
     );
     nucleus.position.set(0.4, 0.2, 0.3);
     this.anatomy.add(nucleus);
@@ -736,7 +736,7 @@
     /* --- DENDRITES : arbres branches ---------------------------------- */
     const neuriteMat = new THREE.MeshPhongMaterial({
       color: C.NEURITE, emissive: 0x07303d, shininess: 70,
-      specular: 0x9fe8ff, transparent: true, opacity: 0.97
+      specular: 0x9fe8ff, transparent: true, opacity: 0.55, depthWrite: false
     });
     const spineGroup = new THREE.Group();
     const myelinGroup = new THREE.Group();
@@ -892,7 +892,7 @@
       const mat = b.kind === 'axon'
         ? new THREE.MeshPhongMaterial({
             color: C.AXON, emissive: 0x0a3b4d, shininess: 90,
-            specular: 0xd6f6ff, transparent: true, opacity: 0.97
+            specular: 0xd6f6ff, transparent: true, opacity: 0.6, depthWrite: false
           })
         : neuriteMat;
       const t = taperedTube(b.pts, u => lerp(b.r0, b.r1, u), 8, mat);
@@ -937,7 +937,7 @@
     if (!this.anatomy) return;
     const box = new THREE.Box3().setFromObject(this.anatomy);
     if (box.isEmpty()) return;
-    this.orbit.frameBox(box, 1.02);
+    this.orbit.frameBox(box, 1.02); this.orbit.state.tDist = Math.max(14, this.orbit.state.tDist * 0.55); this.orbit.state.dist = this.orbit.state.tDist;
     const center = box.getCenter(new THREE.Vector3());
     const r = box.getBoundingSphere(new THREE.Sphere()).radius;
     this.camera.position.set(

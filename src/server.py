@@ -141,7 +141,7 @@ def target_url(upstream: str, path: str) -> str:
     base = str(UPSTREAMS[upstream].get("base_url", "")).rstrip("/")
     if not base:
         raise HTTPException(status_code=500, detail={"error": "upstream_misconfigured", "upstream": upstream})
-    if base.endswith("/v1") and path.startswith("/v1"):
+    if (base.endswith("/v1") or UPSTREAMS[upstream].get("strip_v1")) and path.startswith("/v1"):
         path = path[3:] or "/"
     return base + path
 
@@ -822,7 +822,8 @@ def _tcp_alive(host: str, port: int, timeout: float = 0.7) -> Tuple[bool, Option
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "cache_stats": CACHE.stats(),
+    return {"status": "healthy", "service": "IcyCache", "project_root": str(PROJECT_ROOT),
+            "cache_stats": CACHE.stats(),
             "upstreams": _upstream_names(), "default_upstream": DEFAULT_UPSTREAM}
 
 
