@@ -1,4 +1,4 @@
-> ## ⚠️ NOTICE — The rest of this repository (code, comments, scripts, docs, commits, issues) is written in **French**. Only this README is in English.
+## ⚠️ NOTICE — The rest of this repository (code, comments, scripts, docs, commits, issues) is written in **French**. Only this README is in English.
 > ✅ **SWAP DONE — 2026-10-24.** IcyCache was renamed from CacheForge. The **universal multi-upstream gateway**
 > is now the **single active service on `:8080`**, and the historical server holds the MCP layer.
 > - `src/server.py` → **the gateway** (5 upstreams: omniroute, lmstudio, ollama, openai, anthropic).
@@ -18,6 +18,8 @@
 > (Nothing is written to stdout anymore, but the wrapper remains the safety net.)
 
 # 🔥 IcyCache — Universal LLM Gateway with local cache
+
+[![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
 
 > **"Forge the cache, not the answer."**
 > HTTP gateway that sits between **any client** and **any upstream** (local or cloud),
