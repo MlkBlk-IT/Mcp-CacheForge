@@ -44,7 +44,7 @@
     "cloudflare": {"base_url": "https://api.cloudflare.com/client/v4/accounts/dfbe889cfe78700a4d10897cfd3b581d/ai/v1", "kind": "openai", "headers": {"cf-aig-gateway-id": "default"}}
   },
   "cache": {
-    "db_path": "D:\\IcyCache\\db\\cache.db",
+    "db_path": "db/cache.db",
     "max_entries": 50000,
     "enable_semantic": false,
     "semantic_threshold": 0.95,
@@ -105,7 +105,7 @@
   },
   "logging": {
     "level": "INFO",
-    "file": "D:\\IcyCache\\logs\\app.log",
+    "file": "logs/app.log",
     "max_size_mb": 10
   }
 }

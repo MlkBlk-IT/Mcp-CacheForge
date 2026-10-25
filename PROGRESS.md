@@ -159,6 +159,7 @@ absent (« Lancer via tests\run_isolated.py »). Le passage par le runner est ob
 | `0957112` | 2026-10-24 | chore : `.gitignore` élargi, artefacts de build retirés du suivi |
 | `2933a8f` | 2026-10-25 | Sync sync |
 | `3794a93` | 2026-10-25 | feat : gateway multi-upstream, cache sémantique, entrypoint de warm-up |
+| _(ce commit)_ | 2026-10-25 | feat : packaging — `pyproject.toml`, paquet `icycache`, CLI, wrapper npm, chemins portables |
 
 ### 5.1 Contenu de `3794a93` (dernier push)
 
@@ -188,16 +189,107 @@ absent (« Lancer via tests\run_isolated.py »). Le passage par le runner est ob
 - Aucune clé en clair dans le dépôt : `api_key` est `null`, et les secrets sont référencés par
   `@hermes:mcp_servers.<nom>` (résolus à l'exécution par le mécanisme de secrets d'Hermes).
 - Scan de secrets passé sur les 8 fichiers modifiés + ajoutés : aucune fuite.
-- **Chemins absolus codés en dur** dans les configs et les scripts : `D:\IcyCache\db\cache.db`,
-  `D:\IcyCache\logs\app.log`, `D:\IcyCache\prompts.txt`,
+- **Chemins absolus codés en dur** : `D:\IcyCache\db\cache.db` et
+  `D:\IcyCache\logs\app.log` **ont été supprimés des configs** (devenus relatifs, résolus
+  contre le data dir — voir §8) ; restent `D:\IcyCache\prompts.txt`,
   `C:\Users\Tech\AppData\Local\hermes\config.yaml` (`warmup_cache.py`),
   `D:/Loom/.venv/Scripts/loom-mcp.exe` (downstream du tool cache).
   → Le repo est public : ces chemins sont des informations propres à une machine locale, pas des
-  secrets, mais ils rendent le projet non portable tel quel.
+  secrets, mais ils rendent le projet partiellement non portable.
 - `tool_cache.default` est passé à `allow` : tout outil exposé est désormais cachable par défaut.
   `max_result_bytes` passe à 10 Mio — à surveiller côté mémoire.
 
-## 8. Points de vigilance
+## 8. Distribution et installation [mesuré]
+
+`pyproject.toml` (hatchling) remplace l'ancien `setup.py` — qui était une
+coquille vide (ni packages, ni entry points, ni dépendances) et rendait
+`pip install -e .` inopérant.
+
+| Artefact | Taille | Contenu |
+|---|---|---|
+| `dist/icycache-0.2.0-py3-none-any.whl` | ~295 Ko | 25 fichiers — `icycache/{src,config,static}` + CLI |
+| `dist/icycache-0.2.0.tar.gz` | ~318 Ko | code + configs + dashboard + tests + outils |
+
+### Disposition du paquet installé
+
+Le wheel reproduit la disposition du dépôt, donc `PROJECT_ROOT` (le parent de
+`src/`) pointe au bon endroit dans les deux modes :
+
+```
+icycache/
+  src/       <- les modules (imports à plat, comme dans le dépôt)
+  config/    <- les configs JSON + les règles de normalisation
+  static/    <- dashboard.html, icywebgl.js, three.min.js
+```
+
+Les imports plats (`import icy_core`) sont rendus possibles par un shim dans
+`icycache/__init__.py` qui ajoute `icycache/src` au `sys.path`.
+
+### Chemins portables
+
+Nouveau module `src/icy_paths.py` : un chemin **absolu** dans la config est
+utilisé tel quel, un chemin **relatif** est résolu contre `DATA_DIR`.
+
+| Mode | `config/` et `static/` | `db/` et `logs/` |
+|---|---|---|
+| Checkout source | le dépôt | le dépôt (`D:\IcyCache\db`, `D:\IcyCache\logs`) |
+| Installé (pip/uvx) | dans le paquet | `%LOCALAPPDATA%\IcyCache` |
+
+Les configs sont passées en chemins relatifs (`db/cache.db`, `logs/app.log`).
+**Vérifié : en mode dépôt la résolution donne exactement les mêmes chemins
+qu'avant** (`D:\IcyCache\db\cache.db`), et la suite isolée reste **ALL PASS**.
+
+### Points d'entrée
+
+| Commande | Rôle |
+|---|---|
+| `icycache serve` | La gateway HTTP (`src/server.py`) |
+| `icycache mcp --mode {proxy,mcp-stdio,mcp-sse,mcp-http,all}` | La couche MCP |
+| `icycache doctor` | Diagnostic : chemins, config, upstreams, base, dashboard |
+| `icycache paths` | Où sont stockées les données |
+| `icycache version` | Version |
+
+### Wrapper npm
+
+`package.json` + `bin/icycache.js` + `bin/icycache-mcp.js`. L'ancien
+`package.json` pointait vers un `index.js` **inexistant** : il n'installait
+rien. Le nouveau wrapper expose `icycache` (CLI) et `icycache-mcp` (serveur MCP
+stdio) et localise un Python capable de lancer IcyCache.
+
+### Stubs morts retirés
+
+| Fichier | Raison |
+|---|---|
+| `setup.py` | Remplacé par `pyproject.toml` (il ne déclarait aucun package) |
+| `Cargo.toml` | Aucun fichier `.rs` dans le dépôt → `cargo build` échoue (« no targets ») |
+
+### Deux dépendances qui manquaient [mesuré]
+
+Découvertes en installant le paquet dans un venv vierge :
+
+| Dépendance | Symptôme sans elle | Correctif |
+|---|---|---|
+| `mcp<2` | `mcp>=1.2.0` résolvait **mcp 2.3.0**, où FastMCP a été renommé `MCPServer` → `ModuleNotFoundError: mcp.server.fastmcp` au démarrage du serveur MCP | Borne `mcp>=1.2.0,<2` (la config épinglait `mcp==1.30.0`) |
+| `websockets` | Absent des métadonnées : `uvicorn` ne pouvait pas servir `/ws/events` (le flux live) | `websockets>=12.0` ajouté aux dépendances |
+
+Les deux étaient invisibles depuis le dépôt : le venv de référence les avait déjà.
+
+### Vérifications effectuées [mesuré]
+
+| Contrôle | Résultat |
+|---|---|
+| `pip install` du wheel dans un venv vierge (Python 3.12) | OK, `mcp==1.30.0` résolu |
+| `pip install` du sdist | OK (build depuis les sources) |
+| `icycache version` / `paths` / `doctor` | OK — mode `installe (pip)`, data dir `%LOCALAPPDATA%\IcyCache` |
+| `icycache serve --port 8099` → `/health` | OK — `healthy`, db créée dans le data dir |
+| `icycache serve` → `/api/status` | OK — 18 upstreams sondés, 11 outils MCP listés |
+| `icycache serve` → `/dashboard` | OK — HTTP 200, 135 Ko |
+| WebSocket `/ws/events` | OK — connexion + message `hello` |
+| Handshake MCP stdio via `node bin/icycache-mcp.js` | OK — **11 outils** listés |
+| Suite isolée du dépôt après les changements de chemins | **ALL PASS** (identique à avant) |
+| `npm pack` | 6 fichiers, 8,0 Ko |
+
+## 9. Points de vigilance
 
 1. **`gateway.cache` n'est pas lu** (§3.2) : le cache sémantique est inactif à l'exécution malgré
    l'annonce du commit et du README.
@@ -211,8 +303,11 @@ absent (« Lancer via tests\run_isolated.py »). Le passage par le runner est ob
 6. `CacheForge_Project_Documentation.docx` (40 Ko) est antérieur au rebrand et au gateway ;
    `start_cacheforge.ps1` et `start_icycache.ps1` coexistent.
 
-## 9. Prochaines étapes proposées
+## 10. Prochaines étapes proposées
 
+0. **Publier les artefacts** : `dist/` est ignoré par git. Une GitHub Release
+   (et/ou PyPI) rendrait `pip install icycache` et `npx icycache-mcp`
+   installables sans cloner le dépôt.
 1. Trancher le sort du bloc `gateway.cache` : soit le faire lire par `server.py` (cache sémantique
    réellement actif), soit le supprimer et corriger le README.
 2. Intégrer `test_gateway.py` et `test_prefix_proxy.py` au runner isolé — la gateway doit être

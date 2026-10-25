@@ -12,19 +12,24 @@ Base URL cote client:
 Autres fournisseurs compatibles OpenAI (URLs NON TESTEES): /openrouter /groq /mistral /deepseek
 Surcharge d'une URL amont: variable d'environnement PREFIX_URL_<NOM> (ex: PREFIX_URL_OPENAI).
 """
-import os, json, time, sqlite3, hashlib, logging
+import os, json, time, sqlite3, hashlib, logging, sys
 from pathlib import Path
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from icy_paths import resolve_data_path  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
-DB_FILE = Path(os.environ.get("PREFIX_DB", str(ROOT / "db" / "prefix.db")))
-(ROOT / "logs").mkdir(parents=True, exist_ok=True)
+
+DB_FILE = resolve_data_path(os.environ.get("PREFIX_DB"), "db/prefix.db")
+LOG_DIR = resolve_data_path(None, "logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                    handlers=[logging.FileHandler(ROOT / "logs" / "prefix_proxy.log", encoding="utf-8")])
+                    handlers=[logging.FileHandler(LOG_DIR / "prefix_proxy.log", encoding="utf-8")])
 log = logging.getLogger("PrefixProxy")
 
 

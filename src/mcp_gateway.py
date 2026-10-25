@@ -33,10 +33,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from icy_paths import PROJECT_ROOT, resolve_data_path  # noqa: E402
+
 _CONFIG_FILE = Path(os.environ.get("ICYCACHE_CONFIG") or (PROJECT_ROOT / "config" / "icycache.gateway.json"))
 os.environ["ICYCACHE_CONFIG"] = str(_CONFIG_FILE)
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI, HTTPException, Request  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
@@ -58,8 +60,10 @@ except Exception:  # pragma: no cover
     TOOL_PROXY_OK = False
 
 CONFIG: Dict[str, Any] = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
-DB_FILE = Path(os.environ.get("ICYCACHE_DB") or CONFIG.get("cache", {}).get("db_path")
-               or (PROJECT_ROOT / "db" / "cache.db"))
+DB_FILE = resolve_data_path(
+    os.environ.get("ICYCACHE_DB") or CONFIG.get("cache", {}).get("db_path"),
+    "db/cache.db",
+)
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 UPSTREAMS: Dict[str, Any] = CONFIG.get("upstreams", {})

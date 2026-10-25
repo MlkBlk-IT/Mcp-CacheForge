@@ -29,15 +29,22 @@ from tqdm import tqdm
 # === CONFIGURATION ===
 # Racine du projet derivee du fichier: le code doit fonctionner quel que soit
 # l'emplacement du dossier (D:\IcyCache, un clone, un chemin reseau, Linux...).
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# En mode installe (pip), la racine est le paquet : db/ et logs/ partent alors
+# dans le repertoire utilisateur (icy_paths.DATA_DIR).
+from icy_paths import PROJECT_ROOT, resolve_data_path  # noqa: E402
+
 CONFIG_FILE = PROJECT_ROOT / "config" / "icycache.json"
 # Les noms historiques CACHEFORGE_* restent acceptes (compatibilite annoncee
 # dans le README): sans cela, les harnais d'isolation anciens ecrivaient dans
 # la base de production au lieu de leur base temporaire.
-DB_FILE = Path(os.environ.get("ICYCACHE_DB") or os.environ.get("CACHEFORGE_DB")
-               or (PROJECT_ROOT / "db" / "cache.db"))
-LOG_FILE = Path(os.environ.get("ICYCACHE_LOG") or os.environ.get("CACHEFORGE_LOG")
-                or (PROJECT_ROOT / "logs" / "app.log"))
+DB_FILE = resolve_data_path(
+    os.environ.get("ICYCACHE_DB") or os.environ.get("CACHEFORGE_DB"),
+    "db/cache.db",
+)
+LOG_FILE = resolve_data_path(
+    os.environ.get("ICYCACHE_LOG") or os.environ.get("CACHEFORGE_LOG"),
+    "logs/app.log",
+)
 
 # Chargement de la configuration
 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -57,6 +64,8 @@ for _stream in (sys.stdout, sys.stderr):
             _stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=getattr(logging, CONFIG['logging']['level']),

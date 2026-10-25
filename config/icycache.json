@@ -21,7 +21,7 @@
     "_note": "Streamable HTTP (transport standard des clients MCP recents). Endpoint: http://127.0.0.1:8084/mcp"
   },
   "cache": {
-      "db_path": "D:\\IcyCache\\db\\cache.db",
+      "db_path": "db/cache.db",
       "max_entries": 200000,
       "enable_semantic": true,
       "semantic_threshold": 0.80,
@@ -143,7 +143,7 @@
   },
   "logging": {
     "level": "INFO",
-    "file": "D:\\IcyCache\\logs\\app.log",
+    "file": "logs/app.log",
     "max_size_mb": 10
   }
 }

@@ -11,6 +11,8 @@ fix_*.py
 *.egg-info/
 build/
 dist/
+node_modules/
+*.tgz
 .commit_msg.txt
 
 # Scratch de travail (copies isolées, db, logs, captures) - hors livrable

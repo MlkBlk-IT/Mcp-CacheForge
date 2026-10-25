@@ -253,18 +253,49 @@ and checks that only IcyCache remains reachable.
 
 ## Installation
 
+### pip / uv (recommended)
+
+```bash
+uv tool install icycache          # or: pip install icycache
+```
+
+This gives you the `icycache` console script:
+
+```bash
+icycache serve          # the gateway, http://127.0.0.1:8080
+icycache mcp            # the MCP layer (SSE :8081 / HTTP :8084 / stdio)
+icycache doctor         # diagnostic: paths, config, upstreams, database
+```
+
+Installed packages never write into `site-packages`: `db/` and `logs/` go to
+`%LOCALAPPDATA%\IcyCache` (Windows) or `~/.local/share/IcyCache`.
+Full guide: [`docs/INSTALL.md`](docs/INSTALL.md).
+
+### npm (Node-only clients)
+
+```bash
+npx -y icycache-mcp      # MCP server on stdio
+```
+
+### From source (Windows)
+
 ```powershell
 # 1. Environment (Python 3.12.10)
 python -m venv venv
 .\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-pip install websockets        # required for /ws/events
+pip install -e ".[dev]"
 
 # 2. Manual start
 .\start_icycache.ps1
 
 # 3. Start at login (Task Scheduler, or Startup fallback without admin)
 .\install_autostart.ps1
+```
+
+### Build the packages yourself
+
+```bash
+python -m build          # -> dist/icycache-<version>-py3-none-any.whl + .tar.gz
 ```
 
 ---

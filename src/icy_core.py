@@ -19,17 +19,22 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("IcyCache.core")
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from icy_paths import PROJECT_ROOT, resolve_data_path  # noqa: E402
+
 CONFIG_FILE = Path(os.environ.get("ICYCACHE_CONFIG") or (PROJECT_ROOT / "config" / "icycache.json"))
 with open(CONFIG_FILE, "r", encoding="utf-8") as _f:
     CONFIG = json.load(_f)
 # Priorite: variable d'env > chemin declare dans la config > chemin par defaut.
 # (mcp_gateway/server_new lisaient "cache.db_path" ; on aligne icy_core sur la
 #  meme regle pour que tous les processus pointent sur la meme base.)
-DB_FILE = Path(os.environ.get("ICYCACHE_DB")
-               or os.environ.get("CACHEFORGE_DB")
-               or CONFIG.get("cache", {}).get("db_path")
-               or (PROJECT_ROOT / "db" / "cache.db"))
+# Un chemin relatif est resolu contre DATA_DIR (racine du depot en mode source,
+# repertoire utilisateur en mode installe) -> portable d'une machine a l'autre.
+DB_FILE = resolve_data_path(
+    os.environ.get("ICYCACHE_DB")
+    or os.environ.get("CACHEFORGE_DB")
+    or CONFIG.get("cache", {}).get("db_path"),
+    "db/cache.db",
+)
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 

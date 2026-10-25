@@ -1,8 +1,40 @@
 {
   "name": "icycache",
-  "version": "0.1.0",
-  "description": "IcyCache - I see cache. Instant LLM + tool caching for AI agents.",
-  "main": "index.js",
-  "repository": "https://github.com/MlkBlk-IT/icycache",
-  "license": "MIT"
+  "version": "0.2.0",
+  "description": "IcyCache - passerelle LLM universelle avec cache local. I see cache, I burn cache.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MlkBlk-IT/icycache.git"
+  },
+  "homepage": "https://github.com/MlkBlk-IT/icycache",
+  "bugs": {
+    "url": "https://github.com/MlkBlk-IT/icycache/issues"
+  },
+  "bin": {
+    "icycache": "bin/icycache.js",
+    "icycache-mcp": "bin/icycache-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "llm",
+    "llm-proxy",
+    "cache",
+    "semantic-cache",
+    "fastapi",
+    "local-llm",
+    "ai"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

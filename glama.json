@@ -1,17 +1,33 @@
 {
   "$schema": "https://glama.ai/mcp/schemas/server.json",
   "name": "IcyCache",
-  "description": "Local LLM proxy with semantic cache — FastAPI + SQLite, Aho-Corasick normalization (1114 rules), 4 MCP tools, metrics dashboard. 100% CPU, 0 paid API. I SEE CACHE, I BURN CACHE.",
+  "description": "Universal multi-upstream LLM gateway with a local cache — FastAPI + SQLite, Aho-Corasick normalization (1111 rules), 11 MCP tools, metrics dashboard. 100% CPU, 0 paid API. I SEE CACHE, I BURN CACHE.",
   "maintainers": ["MlkBlk-IT"],
   "category": "proxy",
   "tags": ["cache", "llm-proxy", "semantic-cache", "local-llm", "mcp-server", "fastapi", "lm-studio", "cpu-only"],
   "repository": "https://github.com/MlkBlk-IT/icycache",
   "homepage": "https://github.com/MlkBlk-IT/icycache",
   "license": "MIT",
-  "environmentVariables": [],
+  "environmentVariables": [
+    {
+      "name": "ICYCACHE_CONFIG",
+      "description": "Path to the gateway config file. Defaults to the packaged config.",
+      "isRequired": false
+    },
+    {
+      "name": "ICYCACHE_DB",
+      "description": "Path to the cache database. Defaults to <data dir>/db/cache.db.",
+      "isRequired": false
+    },
+    {
+      "name": "ICYCACHE_HOME",
+      "description": "Data directory for db/ and logs/. Defaults to %LOCALAPPDATA%/IcyCache when installed.",
+      "isRequired": false
+    }
+  ],
   "build": {
     "type": "python",
-    "command": "python -m pip install -e .",
+    "command": "pip install -e .",
     "run": "python src/mcp_server.py --mode mcp-sse"
   }
 }
