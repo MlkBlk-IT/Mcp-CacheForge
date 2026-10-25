@@ -315,13 +315,10 @@ class _ServerConn:
         return self._session is not None and self._thread is not None and self._thread.is_alive()
 
     def stop(self) -> None:
+        # Pas de loop.stop() ni de join (stop() est appele depuis l'event loop principal):
+        # _serve() sort seul via `while self._session is session` et ferme
+        # ClientSession/stdio_client dans la tache qui les a ouverts (contrat anyio).
         self._session = None
-        loop = self._loop
-        if loop is not None and loop.is_running():
-            try:
-                loop.call_soon_threadsafe(loop.stop)
-            except Exception:
-                pass
 
 
 _CONNS: Dict[str, _ServerConn] = {}
@@ -436,14 +433,25 @@ async def _exec(server: str, cfg: Dict[str, Any], tool: str, args: Dict[str, Any
     from mcp import ClientSession
     from mcp.client.stdio import stdio_client
 
+    from mcp.shared.exceptions import McpError
+
     conn = _conn(server)
+    started = False
     try:
         await asyncio.to_thread(conn.start)
         if not conn.alive():
             raise RuntimeError("session persistante indisponible")
+        started = True
         res = await asyncio.to_thread(conn.call_tool, tool, args)
         return _content_to_json(res)
+    except McpError:
+        # Erreur applicative renvoyee par le serveur (outil inconnu, args invalides...):
+        # la session est saine. Ni drop ni rejeu (evite double execution + respawn).
+        raise
     except Exception as exc:
+        if started and isinstance(exc, TimeoutError):
+            # Timeout de l'appel: l'outil peut encore tourner cote serveur -> pas de rejeu.
+            raise
         # Session cassee ou demarrage impossible -> on retente en jetable.
         _drop_conn(server)
         logger.warning("tool_proxy: session persistante %s KO (%s), repli jetable", server,

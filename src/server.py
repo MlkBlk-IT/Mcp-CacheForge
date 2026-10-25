@@ -1249,6 +1249,11 @@ if __name__ == "__main__":
                     try:
                         logger.info(f"Starting {name}...")
                         target()
+                    except SystemExit as e:
+                        # uvicorn quitte via sys.exit(1) si le bind echoue (ex: WinError 10048).
+                        # Relancer en boucle serait inutile: on s'arrete et on le dit.
+                        logger.error(f"{name} exited (code={e.code}); port deja occupe ? pas de restart")
+                        break
                     except Exception as e:
                         logger.error(f"{name} crashed: {e}, restarting in 5s...")
                         time.sleep(5)
@@ -1263,13 +1268,16 @@ if __name__ == "__main__":
             mcp_thread.start()
         
             # Keep main thread alive, monitor threads
+            _dead_logged = set()
             try:
                 while True:
                     time.sleep(10)
-                    if not proxy_thread.is_alive():
-                        logger.warning("Proxy thread died, will restart via wrapper")
-                    if not mcp_thread.is_alive():
-                        logger.warning("MCP SSE thread died, will restart via wrapper")
+                    if not proxy_thread.is_alive() and "proxy" not in _dead_logged:
+                        _dead_logged.add("proxy")
+                        logger.warning("Proxy thread stopped (voir erreur ci-dessus), pas de restart")
+                    if not mcp_thread.is_alive() and "mcp" not in _dead_logged:
+                        _dead_logged.add("mcp")
+                        logger.warning("MCP SSE thread stopped (voir erreur ci-dessus), pas de restart")
             except KeyboardInterrupt:
                 logger.info("Shutdown requested")
                 sys.exit(0)

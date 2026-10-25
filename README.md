@@ -23,6 +23,10 @@
 > **"Forge the cache, not the answer."**
 > HTTP gateway that sits between **any client** and **any upstream** (local or cloud),
 > caches responses and serves them back **instantly** — no CPU regeneration.
+>
+> 📖 **Full configuration guide** : [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)
+> — multi-upstream routing, per-client setup (Hermes, Claude Desktop, Cursor, VS Code,
+> Ollama, direct SDK), MISS→HIT proof, troubleshooting, firewall enforcement.
 
 ---
 
