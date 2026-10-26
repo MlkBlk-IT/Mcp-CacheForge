@@ -1,6 +1,6 @@
 [project]
 name = "icycache"
-version = "0.3.1"
+version = "0.3.2"
 description = "IcyCache - universal LLM gateway with a local cache. I see cache, I burn cache."
 readme = "README.md"
 requires-python = ">=3.10"

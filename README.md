@@ -26,7 +26,7 @@
 
 # 🔥 IcyCache — Universal LLM Gateway with local cache
 
-[![version](https://img.shields.io/badge/v0.3.1-e10600?style=for-the-badge&labelColor=0d0d0d)](https://github.com/MlkBlk-IT/icycache/releases) [![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
+[![version](https://img.shields.io/badge/v0.3.2-e10600?style=for-the-badge&labelColor=0d0d0d)](https://github.com/MlkBlk-IT/icycache/releases) [![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
 
 > **"Forge the cache, not the answer."**
 > HTTP gateway that sits between **any client** and **any upstream** (local or cloud),
@@ -273,18 +273,18 @@ and checks that only IcyCache remains reachable.
 
 ## Installation
 
-> **Not published on PyPI or npm yet.** The names `icycache` and `icycache-mcp` are **free** on both
-> registries, so the commands below are the final ones — but until the first publish they return a
-> 404. Install from source for now:
->
-> ```bash
-> pip install "icycache @ git+https://github.com/MlkBlk-IT/icycache.git"
-> ```
-### pip / uv (recommended)
+> **Published on PyPI and npm.** The repository, the PyPI distribution and the npm package all carry
+> the same name: **`icycache`** — the names were free on both registries, and `icycache-mcp` is the
+> second binary the npm package exposes.
 
 ```bash
 uv tool install icycache          # or: pip install icycache
 ```
+
+| Registry | Package | Page |
+|---|---|---|
+| PyPI | `icycache` | [pypi.org/project/icycache](https://pypi.org/project/icycache/) |
+| npm | `icycache` | [npmjs.com/package/icycache](https://www.npmjs.com/package/icycache) |
 
 This gives you the `icycache` console script:
 

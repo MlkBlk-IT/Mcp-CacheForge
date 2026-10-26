@@ -5,6 +5,37 @@
 
 ---
 
+## v0.3.2 — 2026-10-26
+
+**Published on PyPI and npm.**
+
+### Added
+
+- **The package is on PyPI and npm.** The repository, the PyPI distribution and the npm package all
+  carry the same name — `icycache` — and the README now gives the registry install commands
+  (`uv tool install icycache`, `pip install icycache`, `npx -y icycache`) with links to both
+  registry pages.
+- **PyPI publication uses trusted publishing (OIDC).** The `Publish` workflow mints a short-lived
+  token from the GitHub Actions identity: no PyPI API token is stored on any machine.
+
+### Fixed
+
+- **The README no longer claims the package is unpublished.** v0.3.1 documented the commands as
+  "not published yet"; they now resolve to the real registries.
+- `docs/INSTALL.md` pointed at `dist/icycache-0.2.0-py3-none-any.whl` — the current version is 0.3.2.
+
+### Changed
+
+- Version bumped to 0.3.2 — `pyproject.toml` and `package.json` now match the `v0.3.2` tag and this
+  release.
+
+### Not changed
+
+No code change: the gateway, the MCP layer, the semantic cache and the normalization engine are
+exactly as shipped in v0.3.0.
+
+---
+
 ## v0.3.1 — 2026-10-26
 
 **The install instructions were not true yet.**

@@ -76,7 +76,7 @@ otherwise.
 Install a built artifact:
 
 ```bash
-pip install dist/icycache-0.3.1-py3-none-any.whl
+pip install dist/icycache-0.3.2-py3-none-any.whl
 ```
 
 ## 3. Where the data goes
