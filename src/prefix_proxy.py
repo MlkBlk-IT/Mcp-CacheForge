@@ -62,6 +62,15 @@ FWD = {"authorization", "x-api-key", "anthropic-version", "anthropic-beta", "con
        "openai-organization", "openai-project", "http-referer", "x-title", "user-agent"}
 
 client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=15.0))
+
+async def _recycle_client():
+    """DELTA-002: recycle le client httpx sur erreur (BUG-001 fix)."""
+    global client
+    try:
+        await client.aclose()
+    except Exception:
+        pass
+    client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=15.0))
 app = FastAPI(title="CacheForge PrefixProxy")
 
 
@@ -249,9 +258,18 @@ async def proxy(provider: str, endpoint: str, request: Request):
                 _log_event(provider, model, is_stream, 400, injected, None, ms())
                 return Response(content=err, status_code=400, headers={"content-type": ctype})
     except httpx.HTTPError as e:
+        # DELTA-002: drain + recycle + retry (BUG-001 fix)
+        await _recycle_client()
         log.error("UPSTREAM UNREACHABLE %s: %s: %s", provider, type(e).__name__, e)
-        return JSONResponse({"error": {"message": "upstream unreachable: %s: %s" % (type(e).__name__, e),
-                                       "type": "upstream_error"}}, status_code=502)
+        # Retry une fois après recycle
+        try:
+            resp = await _send(url, headers, body)
+            resp.raise_for_status()
+            log.info("UPSTREAM RECOVERED after retry: %s", provider)
+        except Exception as e2:
+            log.error("UPSTREAM RETRY FAILED %s: %s: %s", provider, type(e2).__name__, e2)
+            return JSONResponse({"error": {"message": "upstream unreachable: %s: %s" % (type(e2).__name__, e2),
+                                           "type": "upstream_error"}}, status_code=502)
 
     ctype = resp.headers.get("content-type", "application/json")
 

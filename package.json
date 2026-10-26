@@ -1,6 +1,6 @@
 {
   "name": "icycache",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "IcyCache - passerelle LLM universelle avec cache local. I see cache, I burn cache.",
   "license": "MIT",
   "repository": {

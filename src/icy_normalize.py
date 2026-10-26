@@ -84,6 +84,8 @@ class Normalizer:
         text = self.unicodedata.normalize("NFKD", text)
         text = text.lower()
         text = self._replace_rules(text)
+        # DELTA-002: normalisation des nombres ("two plus two" → "2+2")
+        text = self._normalize_numbers(text)
         text = "".join(
             c for c in self.unicodedata.normalize("NFD", text) if self.unicodedata.category(c) != "Mn"
         )
@@ -116,6 +118,16 @@ class Normalizer:
         for pattern, replacement in self.regex_compiled:
             text = pattern.sub(replacement, text)
         return text
+
+    def _normalize_numbers(self, text: str) -> str:
+        """DELTA-002: convertit mots-nombres → chiffres et opérateurs verbaux → symboles."""
+        _NUM_WORDS = {"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+                      "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+                      "ten": "10"}
+        for w, d in _NUM_WORDS.items():
+            text = re.sub(rf"\b{w}\b", d, text)
+        return (text.replace(" plus ", "+").replace(" minus ", "-")
+                 .replace(" times ", "*").replace(" divided by ", "/"))
 
     def get_hash(self, normalized_text: str) -> str:
         return hashlib.sha256((normalized_text or "").encode("utf-8")).hexdigest()

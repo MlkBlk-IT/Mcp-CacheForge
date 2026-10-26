@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-21T22:35:16.541496",
-  "total_rules": 1111,
+  "generated": "2026-10-26T09:12:00.000000",
+  "total_rules": 1122,
   "intents": [
     {
       "pattern": "explique|explain|how to|comment faire|qu'est-ce que|what is",
@@ -5772,6 +5772,61 @@
       "pattern": "ok",
       "replace": "",
       "category": "filler_en"
+    },
+    {
+      "pattern": "zero",
+      "replace": "0",
+      "category": "num_words"
+    },
+    {
+      "pattern": "one",
+      "replace": "1",
+      "category": "num_words"
+    },
+    {
+      "pattern": "two",
+      "replace": "2",
+      "category": "num_words"
+    },
+    {
+      "pattern": "three",
+      "replace": "3",
+      "category": "num_words"
+    },
+    {
+      "pattern": "four",
+      "replace": "4",
+      "category": "num_words"
+    },
+    {
+      "pattern": "five",
+      "replace": "5",
+      "category": "num_words"
+    },
+    {
+      "pattern": "six",
+      "replace": "6",
+      "category": "num_words"
+    },
+    {
+      "pattern": "seven",
+      "replace": "7",
+      "category": "num_words"
+    },
+    {
+      "pattern": "eight",
+      "replace": "8",
+      "category": "num_words"
+    },
+    {
+      "pattern": "nine",
+      "replace": "9",
+      "category": "num_words"
+    },
+    {
+      "pattern": "ten",
+      "replace": "10",
+      "category": "num_words"
     }
   ]
 }

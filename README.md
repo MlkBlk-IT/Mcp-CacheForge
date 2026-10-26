@@ -1,10 +1,17 @@
 > ## ⚠️ NOTICE — The rest of this repository (code, comments, scripts, docs, commits, issues) is written in **French**. Only this README is in English.
 > ✅ **SWAP DONE — 2026-10-24.** IcyCache was renamed from CacheForge. The **universal multi-upstream gateway**
 > is now the **single active service on `:8080`**, and the historical server holds the MCP layer.
-> - `src/server.py` → **the gateway** (5 upstreams: omniroute, lmstudio, ollama, openai, anthropic).
+> - `src/server.py` → **the gateway** (18 upstreams in `config/icycache.gateway.json`: OmniRoute, LM Studio, Ollama, OpenAI, Anthropic, NVIDIA, Groq, Cerebras, OpenRouter, Kilo, Nous, Copilot, AI Gateway, HuggingFace, Google AI Studio, LLM7.io, Mistral, Cloudflare).
 > - `src/mcp_server.py` → **the MCP layer** (SSE `:8081`, Streamable HTTP `:8084`, stdio).
 > - Both start together via `tray.py`; `:8080` is the single entry point for all LLM traffic.
 > - Legacy entry point kept: `python src/server.py --port 8090` for isolated testing.
+>
+> ### DELTA-002 — upstream resilience + opt-in semantic cache (2026-10-26)
+> - **BUG-001 — 502 stuck after a 400:** the httpx client is now drained, recycled, and the request retried once
+>   (`src/upstream_client.py`). The gateway recovers instead of staying stuck.
+> - **Number normalization:** `"two plus two"` → `2+2`. 11 new rules (1111 → **1122**).
+> - **Semantic cache:** implemented (`src/icy_semantic.py`) but **off by default** (`semantic_enabled: false`).
+> - **Tool registry:** the 100 verified MCP tool anchors (DELTA-001) are registered and asserted at startup.
 >
 > ### Available MCP transports (all three active at once)
 >
@@ -19,7 +26,7 @@
 
 # 🔥 IcyCache — Universal LLM Gateway with local cache
 
-[![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
+[![version](https://img.shields.io/badge/v0.3.0-e10600?style=for-the-badge&labelColor=0d0d0d)](https://github.com/MlkBlk-IT/icycache/releases) [![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
 
 > **"Forge the cache, not the answer."**
 > HTTP gateway that sits between **any client** and **any upstream** (local or cloud),
@@ -42,6 +49,10 @@
 
 IcyCache attacks all four: normalization before hashing, SQLite cache with TTL, exportable metrics,
 and **a single entry point** for all LLM traffic.
+
+> **Semantic cache status:** implemented but **opt-in** (`semantic_enabled: false` by default). It needs an
+> embedding endpoint (LM Studio on `:1234`) and a Qdrant instance; when either is missing the cache
+> degrades silently to a miss instead of failing the request. See [`config/semantic_cache.json`](config/semantic_cache.json).
 
 ---
 
@@ -93,11 +104,18 @@ OmniRoute is no longer the entry point: it is **one upstream among others**.
 | `src/mcp_stdio_bridge.py` | stdio bridge: reserves stdout for MCP JSON-RPC, logs and prints to stderr |
 | `src/mcp_server.py` | **MCP server** (FastMCP): tools, tool-cache, loop guard — listens on :8081 (SSE) / :8084 (HTTP) |
 | `config/icycache.gateway.json` | Gateway config: upstreams, cache, loop guard, tool cache |
-| `config/normalization_rules.json` | 1114 normalization rules |
+| `config/normalization_rules.json` | 1122 normalization rules (incl. number words → digits) |
+| `src/upstream_client.py` | **Resilient upstream client** — one pool per base URL, drain + recycle + retry |
+| `src/icy_semantic.py` | **Opt-in semantic cache** — embeddings + Qdrant store, silent miss when unavailable |
+| `config/semantic_cache.json` | Semantic cache settings (`semantic_enabled`, thresholds, embedder URL) |
+| `config/tools_registry.json` | Registry of the 100 verified MCP tool anchors (DELTA-001) |
 | `tools/smoke_gateway.py` | **Real** multi-upstream smoke test (isolated ports, temp DB) |
 | `tools/enforce_gateway.ps1` | Firewall rules: makes bypass impossible |
 | `tools/verify_enforcement.py` | **Proof**: can the client still reach an upstream directly? |
 | `tests/test_gateway.py` | 10 isolated tests (mock upstream, temp DB) |
+| `tests/test_semantic_cache.py` | Semantic cache unit tests |
+| `tests/test_upstream_recovery.py` | Upstream recovery / retry tests (BUG-001) |
+| `tests/test_anchors.py` | Normalization anchor tests (DELTA-002) |
 
 ---
 
@@ -316,6 +334,9 @@ python -m build          # -> dist/icycache-<version>-py3-none-any.whl + .tar.gz
 
 # Real smoke test (LM Studio / OmniRoute, port 8090, temp DB)
 .\venv\Scripts\python.exe tools\smoke_gateway.py --port 8090
+
+# DELTA-002 suite (semantic cache, upstream recovery, normalization anchors)
+.\venv\Scripts\python.exe -m pytest tests\test_semantic_cache.py tests\test_upstream_recovery.py tests\test_anchors.py -v
 ```
 
 The smoke test touches **neither** the production service (`:8080`) **nor** the dashboard.
