@@ -26,7 +26,7 @@
 
 # 🔥 IcyCache — Universal LLM Gateway with local cache
 
-[![version](https://img.shields.io/badge/v0.3.0-e10600?style=for-the-badge&labelColor=0d0d0d)](https://github.com/MlkBlk-IT/icycache/releases) [![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
+[![version](https://img.shields.io/badge/v0.3.1-e10600?style=for-the-badge&labelColor=0d0d0d)](https://github.com/MlkBlk-IT/icycache/releases) [![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
 
 > **"Forge the cache, not the answer."**
 > HTTP gateway that sits between **any client** and **any upstream** (local or cloud),

@@ -1,7 +1,7 @@
 {
-  "name": "icycache",
-  "version": "0.3.0",
-  "description": "IcyCache - passerelle LLM universelle avec cache local. I see cache, I burn cache.",
+  "name": "icycache-mcp",
+  "version": "0.3.1",
+  "description": "IcyCache - universal LLM gateway with a local cache. I see cache, I burn cache.",
   "license": "MIT",
   "repository": {
     "type": "git",

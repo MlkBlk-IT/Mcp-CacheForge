@@ -21,7 +21,10 @@
 
 ### Changed
 
-- Version bumped to 0.3.1.
+- Version bumped to 0.3.1 — `pyproject.toml` and `package.json` now match the `v0.3.1` tag and this release.
+- The npm package is now published as **`icycache-mcp`** (the name used by `npx -y icycache-mcp`).
+  The PyPI distribution stays **`icycache`** (`pip install icycache`), and the `icycache` /
+  `icycache-mcp` console scripts are unchanged.
 
 ### Not changed
 
