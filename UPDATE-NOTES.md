@@ -5,6 +5,31 @@
 
 ---
 
+## v0.3.1 — 2026-10-26
+
+**The install instructions were not true yet.**
+
+### Fixed
+
+- **Nothing was published on PyPI or npm.** `pip install icycache` and `npx -y icycache-mcp` both
+  returned a 404 while the README presented them as working commands. The README now says so
+  explicitly and gives the install-from-source command that works today:
+  `pip install "icycache @ git+https://github.com/MlkBlk-IT/icycache.git"`.
+- Unlike `loom-mcp` (which belongs to other projects on both registries), the names `icycache` and
+  `icycache-mcp` are **free** on PyPI and npm — so these commands are the final ones and will work
+  as written once the first publish happens.
+
+### Changed
+
+- Version bumped to 0.3.1.
+
+### Not changed
+
+No code change: the gateway, the MCP layer, the semantic cache and the normalization engine are
+exactly as shipped in v0.3.0.
+
+---
+
 ## v0.3.0 — 2026-10-26
 
 **DELTA-002** — one correction pass over the request path, covering BUG-001, BUG-002 and DELTA-001.

@@ -273,6 +273,14 @@ and checks that only IcyCache remains reachable.
 
 ## Installation
 
+> **Not published on PyPI or npm yet.** The names `icycache` and `icycache-mcp` are **free** on both
+> registries, so the commands below are the final ones — but until the first publish they return a
+> 404. Install from source for now:
+>
+> ```bash
+> pip install "icycache @ git+https://github.com/MlkBlk-IT/icycache.git"
+> ```
+
 ### pip / uv (recommended)
 
 ```bash
