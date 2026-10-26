@@ -328,6 +328,8 @@ pip install -e ".[dev]"
 python -m build          # -> dist/icycache-<version>-py3-none-any.whl + .tar.gz
 ```
 
+> Building and publishing this package: see [`PUBLISHING.md`](PUBLISHING.md).
+
 ---
 
 ## Tests
