@@ -273,9 +273,14 @@ and checks that only IcyCache remains reachable.
 
 ## Installation
 
-> **Published on PyPI and npm.** The repository, the PyPI distribution and the npm package all carry
-> the same name: **`icycache`** — the names were free on both registries, and `icycache-mcp` is the
-> second binary the npm package exposes.
+> **The registry publication is pending.** The repository, the PyPI distribution and the npm package
+> all carry the same name — **`icycache`** — and the packages are built, tagged and ready to publish
+> (`v0.3.2`). The names were free on both registries, and `icycache-mcp` is the second binary the
+> npm package exposes.
+>
+> The registry commands below are the final ones, but they return a 404 until the first publish.
+> Install from source in the meantime:
+> `pip install "icycache @ git+https://github.com/MlkBlk-IT/icycache.git"`.
 
 ```bash
 uv tool install icycache          # or: pip install icycache
