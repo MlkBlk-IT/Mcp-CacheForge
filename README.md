@@ -280,7 +280,6 @@ and checks that only IcyCache remains reachable.
 > ```bash
 > pip install "icycache @ git+https://github.com/MlkBlk-IT/icycache.git"
 > ```
-
 ### pip / uv (recommended)
 
 ```bash
@@ -301,8 +300,11 @@ Full guide: [`docs/INSTALL.md`](docs/INSTALL.md).
 
 ### npm (Node-only clients)
 
+The npm package is `icycache` — the same name as the repository. It exposes two binaries:
+
 ```bash
-npx -y icycache-mcp      # MCP server on stdio
+npx -y icycache --help              # the CLI (serve / mcp / doctor)
+npx -y -p icycache icycache-mcp     # MCP server on stdio
 ```
 
 ### From source (Windows)

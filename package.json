@@ -1,5 +1,5 @@
 {
-  "name": "icycache-mcp",
+  "name": "icycache",
   "version": "0.3.1",
   "description": "IcyCache - universal LLM gateway with a local cache. I see cache, I burn cache.",
   "license": "MIT",
