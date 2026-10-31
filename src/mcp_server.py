@@ -582,6 +582,9 @@ async def proxy_chat(request: Request):
     
     # Hash du payload complet (clé de cache robuste)
     p_hash = hashlib.sha256(json.dumps(cache_payload, sort_keys=True).encode('utf-8')).hexdigest()
+    # Compatibilite cache v1 : les anciennes cles ne contenaient pas _tools_sig.
+    legacy_payload = {k: v for k, v in body.items() if k not in CACHE_KEY_IGNORED}
+    legacy_hash = hashlib.sha256(json.dumps(legacy_payload, sort_keys=True).encode('utf-8')).hexdigest()
     
     # CHECK CACHE
     # FIX #5: Bypass cache si température > 0 (évite réponses figées non déterministes)
@@ -589,6 +592,10 @@ async def proxy_chat(request: Request):
     should_cache = (temp == 0.0)
     if should_cache:
         cached = cache.get(p_hash)
+        if cached is None and legacy_hash != p_hash:
+            cached = cache.get(legacy_hash)
+            if cached is not None:
+                p_hash = legacy_hash
     else:
         logger.warning(f"CACHE BYPASS: temperature={temp} > 0.0 (non-deterministic)")
         cached = None
@@ -785,8 +792,14 @@ async def proxy_chat(request: Request):
     async def generate_and_cache(client, response, t_fwd):
         accumulated_response = []
         usage, model_real, ttft_ms = {}, None, None
+        stream_completed = False
+        abort_logged = False
         try:
             async for line in response.aiter_lines():
+                if await request.is_disconnected():
+                    logger.warning(f"STREAM ABORTED by client: {p_hash[:8]}... (not cached, no event)")
+                    abort_logged = True
+                    return
                 if not line:
                     continue
                 usage_only = False
@@ -806,13 +819,18 @@ async def proxy_chat(request: Request):
                 yield f"{line}\n\n"
                 if not usage_only and not line.startswith('data: [DONE]'):
                     accumulated_response.append(line)
+            stream_completed = True
         except (asyncio.CancelledError, GeneratorExit):
             logger.warning(f"STREAM ABORTED by client: {p_hash[:8]}... (not cached, no event)")
+            abort_logged = True
             raise
         except Exception:
             logger.exception(f"STREAM ERROR mid-stream: {p_hash[:8]}... (not cached)")
+            abort_logged = True
             raise
         finally:
+            if not stream_completed and not abort_logged:
+                logger.warning(f"STREAM ABORTED by client: {p_hash[:8]}... (not cached, no event)")
             try:
                 await response.aclose()
                 # DELTA-002: ne pas fermer le ResilientUpstream (persistant, géré par le pool)
@@ -853,9 +871,7 @@ async def proxy_chat(request: Request):
             response = await _upstream_s.post_json(_up_path_s, fwd, stream=True, headers=headers)
         except UpstreamError as e:
             logger.error(f"UPSTREAM {e.status} (stream) body={e.body[:2000]}")
-            return JSONResponse({"error": {"message": f"upstream unreachable: {e.upstream} returned {e.status}: {e.body[:200]}",
-                                           "type": "upstream_error", "upstream": e.upstream,
-                                           "upstream_status": e.status}}, status_code=502)
+            return Response(content=e.body, status_code=e.status, media_type="application/json")
         except Exception as e:
             logger.exception(f"UPSTREAM UNREACHABLE (stream): {type(e).__name__}: {e}")
             return JSONResponse({"error": {"message": f"upstream error: {type(e).__name__}: {e!r}",
@@ -879,9 +895,7 @@ async def proxy_chat(request: Request):
             resp = await _upstream.post_json(_up_path, body, stream=False, headers=headers)
         except UpstreamError as e:
             logger.error(f"UPSTREAM {e.status} (non-stream) body={e.body[:2000]}")
-            return JSONResponse({"error": {"message": f"upstream unreachable: {e.upstream} returned {e.status}: {e.body[:200]}",
-                                           "type": "upstream_error", "upstream": e.upstream,
-                                           "upstream_status": e.status}}, status_code=502)
+            return Response(content=e.body, status_code=e.status, media_type="application/json")
         except Exception as e:
             logger.exception(f"UPSTREAM UNREACHABLE (non-stream): {type(e).__name__}: {e}")
             return JSONResponse({"error": {"message": f"upstream error: {type(e).__name__}: {e!r}",
