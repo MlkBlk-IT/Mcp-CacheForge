@@ -33,7 +33,7 @@
 
 <p align="center"><img src="https://raw.githubusercontent.com/MlkBlk-IT/icycache/main/docs/mlkblk-banner.svg" width="100%" alt="icycache — Malik Belkacemi · MLKBLK-IT" /></p>
 
-[![version](https://img.shields.io/badge/v0.3.2-e10600?style=for-the-badge&labelColor=0d0d0d)](https://github.com/MlkBlk-IT/icycache/releases) [![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
+[![version](https://img.shields.io/badge/v0.3.2-e10600?style=for-the-badge&labelColor=0d0d0d)](https://github.com/MlkBlk-IT/icycache/releases) [![PyPI](https://img.shields.io/pypi/v/icycache?style=flat-square&logo=pypi)](https://pypi.org/project/icycache/) [![npm](https://img.shields.io/npm/v/@mlkblkit/icycache?style=flat-square&logo=npm)](https://www.npmjs.com/package/@mlkblkit/icycache) [![GitHub stars](https://img.shields.io/github/stars/MlkBlk-IT/icycache?style=flat-square)](https://github.com/MlkBlk-IT/icycache/stargazers) ![README views](https://hits.sh/github.com/MlkBlk-IT/icycache.svg?label=README%20views) [![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
 
 > **"Forge the cache, not the answer."**
 > HTTP gateway that sits between **any client** and **any upstream** (local or cloud),
@@ -286,14 +286,9 @@ and checks that only IcyCache remains reachable.
 
 ## Installation
 
-> **The registry publication is pending.** The repository, the PyPI distribution and the npm package
-> all carry the same name — **`icycache`** — and the packages are built, tagged and ready to publish
-> (`v0.3.2`). The names were free on both registries, and `icycache-mcp` is the second binary the
-> npm package exposes.
->
-> The registry commands below are the final ones, but they return a 404 until the first publish.
-> Install from source in the meantime:
-> `pip install "icycache @ git+https://github.com/MlkBlk-IT/icycache.git"`.
+> **Published:** the repository, PyPI distribution and scoped npm package are available publicly.
+> The Python package is `icycache`. The public npm package is scoped as **`@mlkblkit/icycache`**
+> because the unscoped name was unavailable; it exposes both `icycache` and `icycache-mcp`.
 
 ```bash
 uv tool install icycache          # or: pip install icycache
@@ -302,7 +297,7 @@ uv tool install icycache          # or: pip install icycache
 | Registry | Package | Page |
 |---|---|---|
 | PyPI | `icycache` | [pypi.org/project/icycache](https://pypi.org/project/icycache/) |
-| npm | `icycache` | [npmjs.com/package/icycache](https://www.npmjs.com/package/icycache) |
+| npm | `@mlkblkit/icycache` | [npmjs.com/package/@mlkblkit/icycache](https://www.npmjs.com/package/@mlkblkit/icycache) |
 
 This gives you the `icycache` console script:
 
