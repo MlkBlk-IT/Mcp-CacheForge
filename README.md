@@ -6,6 +6,11 @@
 > - Both start together via `tray.py`; `:8080` is the single entry point for all LLM traffic.
 > - Legacy entry point kept: `python src/server.py --port 8090` for isolated testing.
 >
+> ### Update (2026-10-31) — proxy robustness
+> - Legacy cache keys (built before `_tools_sig`) still hit, so v1 cache entries are not orphaned.
+> - A client disconnect mid-stream is detected and logged; an aborted stream is not cached.
+> - Upstream errors now return the upstream's own status and body instead of a generic 502.
+>
 > ### DELTA-002 — upstream resilience + opt-in semantic cache (2026-10-26)
 > - **BUG-001 — 502 stuck after a 400:** the httpx client is now drained, recycled, and the request retried once
 >   (`src/upstream_client.py`). The gateway recovers instead of staying stuck.
@@ -37,6 +42,12 @@
 > Ollama, direct SDK), MISS→HIT proof, troubleshooting, firewall enforcement.
 
 ---
+
+## Dashboard
+
+![IcyCache dashboard](docs/images/dashboard.png)
+
+*Read-only web dashboard (`http://127.0.0.1:8080/dashboard`) on a local instance, captured 2026-10-31.*
 
 ## The problem
 
