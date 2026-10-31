@@ -31,6 +31,8 @@
 
 # 🔥 IcyCache — Universal LLM Gateway with local cache
 
+<p align="center"><img src="https://raw.githubusercontent.com/MlkBlk-IT/icycache/main/docs/readme-header.svg" width="100%" alt="icycache visual header" /></p>
+
 [![version](https://img.shields.io/badge/v0.3.2-e10600?style=for-the-badge&labelColor=0d0d0d)](https://github.com/MlkBlk-IT/icycache/releases) [![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
 
 > **"Forge the cache, not the answer."**
