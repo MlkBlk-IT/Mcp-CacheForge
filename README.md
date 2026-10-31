@@ -31,7 +31,7 @@
 
 # 🔥 IcyCache — Universal LLM Gateway with local cache
 
-<p align="center"><img src="https://raw.githubusercontent.com/MlkBlk-IT/icycache/main/docs/mlkblk-banner.svg" width="100%" alt="icycache — Malik Belkacemi · MLKBLK-IT" /></p>
+<p align="center"><img src="https://raw.githubusercontent.com/MlkBlk-IT/icycache/main/docs/mlkblk-banner-v2.svg" width="100%" alt="IcyCache — Malik Belkacemi · MLKBLK-IT" /></p>
 
 [![version](https://img.shields.io/badge/v0.3.2-e10600?style=for-the-badge&labelColor=0d0d0d)](https://github.com/MlkBlk-IT/icycache/releases) [![PyPI](https://img.shields.io/pypi/v/icycache?style=flat-square&logo=pypi)](https://pypi.org/project/icycache/) [![npm](https://img.shields.io/npm/v/@mlkblkit/icycache?style=flat-square&logo=npm)](https://www.npmjs.com/package/@mlkblkit/icycache) [![GitHub stars](https://img.shields.io/github/stars/MlkBlk-IT/icycache?style=flat-square)](https://github.com/MlkBlk-IT/icycache/stargazers) ![README views](https://hits.sh/github.com/MlkBlk-IT/icycache.svg?label=README%20views) [![M8ven Score](https://m8ven.ai/badge/mcp/mlkblk-it-mcp-cacheforge-16d3le)](https://m8ven.ai/mcp/mlkblk-it-mcp-cacheforge-16d3le?s=readme)
 
