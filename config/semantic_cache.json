@@ -1,5 +1,5 @@
 {
-  "semantic_enabled": false,
+  "semantic_enabled": true,
   "semantic_threshold": 0.95,
   "semantic_relax_threshold": 0.97,
   "semantic_embed_url": "http://127.0.0.1:1234",

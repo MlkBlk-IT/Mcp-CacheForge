@@ -85,7 +85,7 @@ def decode_entry(raw: str) -> Dict[str, Any]:
 class CacheStore:
     """Acces thread-safe (un lock par operation) au cache LLM."""
 
-    def __init__(self, db_path: Path, ttl_seconds: int = 86400, max_entries: int = 10000):
+    def __init__(self, db_path: Path, ttl_seconds: int = 604800, max_entries: int = 10000):
         self.db_path = Path(db_path)
         self.ttl_seconds = int(ttl_seconds)
         self.max_entries = int(max_entries)

@@ -17,3 +17,7 @@ node_modules/
 
 # Scratch de travail (copies isolées, db, logs, captures) - hors livrable
 scratch/
+
+# artefacts de build / archives tierces
+dist_codex/
+docs/*.zip

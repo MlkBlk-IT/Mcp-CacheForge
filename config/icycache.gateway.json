@@ -7,12 +7,18 @@
   "mcp": {
     "host": "127.0.0.1",
     "port": 8081,
-    "transport": ["stdio", "sse"]
+    "transport": [
+      "stdio",
+      "sse"
+    ]
   },
   "mcp_gateway": {
     "host": "127.0.0.1",
     "port": 8083,
-    "transport": ["stdio", "sse"],
+    "transport": [
+      "stdio",
+      "sse"
+    ],
     "_note": "Serveur MCP de la gateway. 8081 est servi par mcp_server.py (serveur MCP)."
   },
   "gateway": {
@@ -24,24 +30,94 @@
     "_note": "default_upstream = defaut EXPLICITE de la config (pas de fallback code vers OmniRoute). null = le client doit nommer son upstream (prefixe /<upstream>/v1/..., header X-IcyCache-Upstream ou champ 'upstream')."
   },
   "upstreams": {
-    "omniroute": {"base_url": "http://localhost:20128", "kind": "openai"},
-    "lmstudio":  {"base_url": "http://localhost:1234",  "kind": "openai"},
-    "ollama":    {"base_url": "http://localhost:11434", "kind": "openai"},
-    "openai":    {"base_url": "https://api.openai.com", "kind": "openai"},
-    "anthropic": {"base_url": "https://api.anthropic.com", "kind": "anthropic"},
-    "nvidia":    {"base_url": "https://integrate.api.nvidia.com/v1", "kind": "openai"},
-    "groq":      {"base_url": "https://api.groq.com/openai/v1", "kind": "openai"},
-    "cerebras":  {"base_url": "https://api.cerebras.ai/v1", "kind": "openai", "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) HermesAgent/0.22.2"}},
-    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "kind": "openai"},
-    "kilo":      {"base_url": "https://ai-gateway.kilo.ai/api/v1", "kind": "openai"},
-    "nous":      {"base_url": "https://inference-api.nousresearch.com/v1", "kind": "openai"},
-    "copilot":   {"base_url": "https://api.githubcopilot.com", "kind": "openai"},
-    "ai-gateway": {"base_url": "https://ai-gateway.vercel.sh/v1", "kind": "openai"},
-    "huggingface": {"base_url": "https://router.huggingface.co/v1", "kind": "openai"},
-    "google-aistudio": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "kind": "openai", "strip_v1": true},
-    "llm7io":    {"base_url": "https://api.llm7.io/v1", "kind": "openai"},
-    "mistral":   {"base_url": "https://api.mistral.ai/v1", "kind": "openai"},
-    "cloudflare": {"base_url": "https://api.cloudflare.com/client/v4/accounts/dfbe889cfe78700a4d10897cfd3b581d/ai/v1", "kind": "openai", "headers": {"cf-aig-gateway-id": "default"}}
+    "omniroute": {
+      "base_url": "http://localhost:20128",
+      "kind": "openai"
+    },
+    "lmstudio": {
+      "base_url": "http://localhost:1234",
+      "kind": "openai"
+    },
+    "ollama": {
+      "base_url": "http://localhost:11434",
+      "kind": "openai"
+    },
+    "openai": {
+      "base_url": "https://api.openai.com",
+      "kind": "openai"
+    },
+    "anthropic": {
+      "base_url": "https://api.anthropic.com",
+      "kind": "anthropic"
+    },
+    "nvidia": {
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "kind": "openai"
+    },
+    "groq": {
+      "base_url": "https://api.groq.com/openai/v1",
+      "kind": "openai"
+    },
+    "cerebras": {
+      "base_url": "https://api.cerebras.ai/v1",
+      "kind": "openai",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) HermesAgent/0.22.2"
+      }
+    },
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "kind": "openai"
+    },
+    "kilo": {
+      "base_url": "https://ai-gateway.kilo.ai/api/v1",
+      "kind": "openai"
+    },
+    "nous": {
+      "base_url": "https://inference-api.nousresearch.com/v1",
+      "kind": "openai"
+    },
+    "copilot": {
+      "base_url": "https://api.githubcopilot.com",
+      "kind": "openai"
+    },
+    "ai-gateway": {
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "kind": "openai"
+    },
+    "huggingface": {
+      "base_url": "https://router.huggingface.co/v1",
+      "kind": "openai"
+    },
+    "google-aistudio": {
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "kind": "openai",
+      "strip_v1": true
+    },
+    "llm7io": {
+      "base_url": "https://api.llm7.io/v1",
+      "kind": "openai"
+    },
+    "mistral": {
+      "base_url": "https://api.mistral.ai/v1",
+      "kind": "openai"
+    },
+    "cloudflare": {
+      "base_url": "https://api.cloudflare.com/client/v4/accounts/dfbe889cfe78700a4d10897cfd3b581d/ai/v1",
+      "kind": "openai",
+      "headers": {
+        "cf-aig-gateway-id": "default"
+      }
+    },
+    "ollama-cloud": {
+      "base_url": "https://ollama.com/v1",
+      "kind": "openai"
+    },
+    "vertex": {
+      "base_url": "https://aiplatform.googleapis.com/v1beta1/projects/project-e02f0c74-91e6-49ad-bad/locations/global/endpoints/openapi",
+      "kind": "openai",
+      "strip_v1": true
+    }
   },
   "cache": {
     "db_path": "db/cache.db",
@@ -55,40 +131,122 @@
   "loop_guard": {
     "enabled": true,
     "window_seconds": 300,
-    "tools": {"warn_after": 3, "block_after": 5, "max_cycle_len": 3},
-    "llm": {"warn_after": 3, "action": "warn", "block_after": 6}
+    "tools": {
+      "warn_after": 3,
+      "block_after": 5,
+      "max_cycle_len": 3
+    },
+    "llm": {
+      "warn_after": 3,
+      "action": "warn",
+      "block_after": 6
+    }
   },
   "tool_cache": {
     "enabled": true,
     "default": "allow",
     "max_result_bytes": 10485760,
     "downstream": {
-      "github": {"transport": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"]},
-      "fetch": {"transport": "stdio", "command": "uvx", "args": ["mcp-server-fetch@2026.10.10"]},
-      "omniroute": {"transport": "sse", "url": "http://127.0.0.1:20128/mcp"},
-      "qwen-chroma": {"transport": "stdio", "command": "python", "args": ["C:/AI/EmbeddingDB/hermes_qdrant_mcp.py"]},
-      "icycache": {"transport": "sse", "url": "http://127.0.0.1:8081/sse"},
-      "loom": {"transport": "stdio", "command": "D:/Loom/.venv/Scripts/loom-mcp.exe"},
-      "wispr_flow_mcp": {"transport": "stdio", "command": "wispr-flow-mcp"},
-      "dak-notebook": {"transport": "stdio", "command": "dak-notebook"},
-      "dak-viz": {"transport": "stdio", "command": "dak-viz"},
-      "dak-bigquery": {"transport": "stdio", "command": "dak-bigquery"},
-      "dak-gcs": {"transport": "stdio", "command": "dak-gcs"},
-      "dak-spanner": {"transport": "stdio", "command": "dak-spanner"}
+      "github": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ]
+      },
+      "fetch": {
+        "transport": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-fetch@2026.10.10"
+        ]
+      },
+      "omniroute": {
+        "transport": "sse",
+        "url": "http://127.0.0.1:20128/mcp"
+      },
+      "qwen-chroma": {
+        "transport": "stdio",
+        "command": "python",
+        "args": [
+          "C:/AI/EmbeddingDB/hermes_qdrant_mcp.py"
+        ]
+      },
+      "icycache": {
+        "transport": "sse",
+        "url": "http://127.0.0.1:8081/sse"
+      },
+      "loom": {
+        "transport": "stdio",
+        "command": "D:/Loom/.venv/Scripts/loom-mcp.exe"
+      },
+      "wispr_flow_mcp": {
+        "transport": "stdio",
+        "command": "wispr-flow-mcp"
+      },
+      "dak-notebook": {
+        "transport": "stdio",
+        "command": "dak-notebook"
+      },
+      "dak-viz": {
+        "transport": "stdio",
+        "command": "dak-viz"
+      },
+      "dak-bigquery": {
+        "transport": "stdio",
+        "command": "dak-bigquery"
+      },
+      "dak-gcs": {
+        "transport": "stdio",
+        "command": "dak-gcs"
+      },
+      "dak-spanner": {
+        "transport": "stdio",
+        "command": "dak-spanner"
+      }
     },
     "policy": {
-      "github.*": {"ttl_seconds": 3600},
-      "fetch.*": {"ttl_seconds": 3600},
-      "omniroute.*": {"ttl_seconds": 1800},
-      "qwen-chroma.*": {"ttl_seconds": 7200},
-      "icycache.*": {"ttl_seconds": 300},
-      "loom.*": {"ttl_seconds": 3600},
-      "wispr_flow_mcp.*": {"ttl_seconds": 600},
-      "dak-.*": {"ttl_seconds": 1800}
+      "github.*": {
+        "ttl_seconds": 3600
+      },
+      "fetch.*": {
+        "ttl_seconds": 3600
+      },
+      "omniroute.*": {
+        "ttl_seconds": 1800
+      },
+      "qwen-chroma.*": {
+        "ttl_seconds": 7200
+      },
+      "icycache.*": {
+        "ttl_seconds": 300
+      },
+      "loom.*": {
+        "ttl_seconds": 3600
+      },
+      "wispr_flow_mcp.*": {
+        "ttl_seconds": 600
+      },
+      "dak-.*": {
+        "ttl_seconds": 1800
+      }
     },
     "_example": {
-      "downstream": {"srv1": {"transport": "stdio", "command": "node", "args": ["server.js"]}},
-      "policy": {"srv1.nom_du_tool": {"ttl_seconds": 60}}
+      "downstream": {
+        "srv1": {
+          "transport": "stdio",
+          "command": "node",
+          "args": [
+            "server.js"
+          ]
+        }
+      },
+      "policy": {
+        "srv1.nom_du_tool": {
+          "ttl_seconds": 60
+        }
+      }
     }
   },
   "normalization": {
@@ -97,7 +255,7 @@
       "config": "configuration",
       "setup": "configuration",
       "stp": "",
-      "s'il te pla\u00eet": "",
+      "s'il te plaît": "",
       "please": "",
       "can you": "",
       "peux-tu": ""

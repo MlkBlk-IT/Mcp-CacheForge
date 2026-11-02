@@ -37,6 +37,15 @@ CACHE_KEY_IGNORED = {"stream", "stream_options", "user", "metadata"}
 # Il change a chaque requete et empeche tout HIT : retire de la CLE uniquement.
 _VOLATILE_TAIL = re.compile(r"retrieved skills\W*top\W?k relevant to your query.*$", re.DOTALL)
 
+# Metadata de session injectee par Hermes dans le system prompt
+# ("Conversation started: Sunday, November 01, 2026 (America/Montreal, EST, UTC-05:00)").
+# Change a chaque session -> retire de la CLE de cache (system prompt uniquement,
+# JAMAIS dans les messages utilisateur qui peuvent contenir des dates legitimes).
+_VOLATILE_SYSTEM_DATES = re.compile(
+    r"Conversation started:.*?(?:UTC[+-]\d{2}:\d{2})\)?",
+    re.DOTALL | re.IGNORECASE,
+)
+
 
 def canonical(obj: Any) -> str:
     """JSON canonique (cles triees, separateurs compacts) -> hachage stable."""
@@ -166,6 +175,26 @@ def text_blocks(content: Any) -> list:
     return content
 
 
+def strip_system_dates(text: Any) -> Any:
+    """Retire les metadata de session volatiles (Conversation started: ...) du system prompt.
+
+    Applique UNIQUEMENT sur le champ 'system' — jamais sur les messages utilisateur.
+    """
+    if isinstance(text, str):
+        return _VOLATILE_SYSTEM_DATES.sub("", text).strip()
+    if isinstance(text, list):
+        out = []
+        for block in text:
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+                b = dict(block)
+                b["text"] = _VOLATILE_SYSTEM_DATES.sub("", b["text"]).strip()
+                out.append(b)
+            else:
+                out.append(block)
+        return out
+    return text
+
+
 def normalize_payload(body: Dict[str, Any]) -> Dict[str, Any]:
     """Copie du body ou les contenus textuels sont normalises (pour la cle de cache).
 
@@ -179,11 +208,22 @@ def normalize_payload(body: Dict[str, Any]) -> Dict[str, Any]:
         if key in out:
             val = out[key]
             if key == "messages" and isinstance(val, list):
-                out[key] = [
-                    {**m, "content": text_blocks(m.get("content"))} if isinstance(m, dict) else m for m in val
-                ]
-            elif key == "system" and isinstance(val, list):
-                out[key] = text_blocks(val)
+                norm_msgs = []
+                for m in val:
+                    if not isinstance(m, dict):
+                        norm_msgs.append(m)
+                        continue
+                    nm = {**m, "content": text_blocks(m.get("content"))}
+                    nm.pop("tool_call_id", None)  # correlation ID, pas du contenu
+                    if isinstance(nm.get("tool_calls"), list):
+                        nm["tool_calls"] = [
+                            {**tc, "id": ""} if isinstance(tc, dict) else tc
+                            for tc in nm["tool_calls"]
+                        ]
+                    norm_msgs.append(nm)
+                out[key] = norm_msgs
+            elif key == "system":
+                out[key] = text_blocks(strip_system_dates(val))
             else:
                 out[key] = text_blocks(val)
     return out

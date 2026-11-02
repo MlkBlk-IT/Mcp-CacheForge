@@ -87,7 +87,7 @@ WS_DELTA_INTERVAL = float(GW.get("ws_delta_interval_s", 0.25))
 
 CACHE = CacheStore(
     DB_FILE,
-    ttl_seconds=int(CACHE_CFG.get("ttl_seconds", 86400)),
+    ttl_seconds=int(CACHE_CFG.get("ttl_seconds", 604800)),  # 7 jours defaut (etait 86400)
     max_entries=int(CACHE_CFG.get("max_entries", 10000)),
 )
 
@@ -880,6 +880,8 @@ async def api_metrics():
     conn = sqlite3.connect(DB_FILE)
     try:
         ok = "kind!='HIT' AND completion_tokens>0 AND latency_ms>0"
+        # os = one-shot (non-agentic): NOT (stream=1 AND prompt_tokens > 10000)
+        os_cond = "NOT (stream=1 AND COALESCE(prompt_tokens,0) > 10000)"
         r = conn.execute(f"""SELECT COUNT(*), COALESCE(SUM(kind='HIT'),0), COALESCE(SUM(kind='MISS'),0),
             COALESCE(SUM(kind='BYPASS'),0),
             COALESCE(SUM(CASE WHEN kind!='HIT' THEN prompt_tokens END),0),
@@ -889,19 +891,35 @@ async def api_metrics():
             COALESCE(SUM(CASE WHEN {ok} THEN latency_ms END),0),
             COALESCE(SUM(CASE WHEN kind!='HIT' AND prompt_tokens IS NULL THEN 1 END),0),
             COALESCE(SUM(CASE WHEN kind!='HIT' AND completion_tokens>0 AND ttft_ms>0 AND latency_ms>ttft_ms+500 THEN completion_tokens END),0),
-            COALESCE(SUM(CASE WHEN kind!='HIT' AND completion_tokens>0 AND ttft_ms>0 AND latency_ms>ttft_ms+500 THEN latency_ms-ttft_ms END),0)
+            COALESCE(SUM(CASE WHEN kind!='HIT' AND completion_tokens>0 AND ttft_ms>0 AND latency_ms>ttft_ms+500 THEN latency_ms-ttft_ms END),0),
+            COALESCE(SUM(CASE WHEN {os_cond} THEN 1 END),0),
+            COALESCE(SUM(CASE WHEN kind='HIT' AND {os_cond} THEN 1 END),0),
+            COALESCE(SUM(CASE WHEN kind='MISS' AND {os_cond} THEN 1 END),0),
+            COALESCE(SUM(CASE WHEN kind='BYPASS' AND {os_cond} THEN 1 END),0),
+            COALESCE(SUM(CASE WHEN kind='HIT' AND {os_cond} AND latency_ms>0 THEN latency_ms END),0),
+            COALESCE(SUM(CASE WHEN kind='HIT' AND {os_cond} AND latency_ms>0 THEN 1 END),0),
+            COALESCE(SUM(CASE WHEN kind='MISS' AND {os_cond} AND latency_ms>0 THEN latency_ms END),0),
+            COALESCE(SUM(CASE WHEN kind='MISS' AND {os_cond} AND latency_ms>0 THEN 1 END),0)
             FROM events""").fetchone()
         rows = conn.execute("""SELECT datetime(ts,'localtime'), kind, model_real, prompt_tokens,
             completion_tokens, latency_ms, ttft_ms, saved_prompt+saved_completion
             FROM events ORDER BY id DESC LIMIT 50""").fetchall()
     finally:
         conn.close()
-    n, hits, miss, byp, tin, tout, sin, sout, tk_c, tk_ms, no_usage, d_c, d_ms = r
+    n, hits, miss, byp, tin, tout, sin, sout, tk_c, tk_ms, no_usage, d_c, d_ms, \
+        os_n, os_hits, os_miss, os_byp, os_hit_lat_sum, os_hit_lat_cnt, os_miss_lat_sum, os_miss_lat_cnt = r
     spent, saved = tin + tout, sin + sout
     recent = [{"ts": x[0], "kind": x[1], "model": x[2], "in": x[3], "out": x[4],
                "tks": round(x[4] * 1000 / x[5], 1) if x[1] != "HIT" and x[4] and x[5] else None,
                "tks_decode": round(x[4] * 1000 / (x[5] - x[6]), 1) if x[1] != "HIT" and x[4] and x[5] and x[6] and x[5] - x[6] >= 500 else None,
                "latency_ms": x[5], "ttft_ms": x[6], "saved": x[7]} for x in rows]
+    os_hr = round(100 * os_hits / os_n, 1) if os_n else 0
+    os_hit_lat = round(os_hit_lat_sum / os_hit_lat_cnt, 1) if os_hit_lat_cnt else None
+    os_miss_lat = round(os_miss_lat_sum / os_miss_lat_cnt, 1) if os_miss_lat_cnt else None
+    ag_n = n - os_n
+    ag_hits = hits - os_hits
+    ag_hr = round(100 * ag_hits / ag_n, 1) if ag_n else 0
+    speedup = round(os_miss_lat / os_hit_lat, 1) if os_hit_lat and os_hit_lat > 0 and os_miss_lat else None
     return {"requests": n, "hits": hits, "misses": miss, "bypass": byp,
             "hit_rate_pct": round(100 * hits / n, 1) if n else 0,
             "tokens_in_spent": tin, "tokens_out_spent": tout,
@@ -911,7 +929,12 @@ async def api_metrics():
             "tks_decode_avg": round(d_c * 1000 / d_ms, 1) if d_ms else None,
             "tks_decode_last": next((x["tks_decode"] for x in recent if x["tks_decode"]), None),
             "tks_last": next((x["tks"] for x in recent if x["tks"]), None),
-            "events_without_usage": no_usage, "recent": recent}
+            "events_without_usage": no_usage,
+            "oneshot_requests": os_n, "oneshot_hits": os_hits, "oneshot_misses": os_miss,
+            "oneshot_bypass": os_byp, "oneshot_hit_rate_pct": os_hr,
+            "oneshot_hit_latency_ms": os_hit_lat, "oneshot_miss_latency_ms": os_miss_lat,
+            "agentic_requests": ag_n, "agentic_hits": ag_hits, "agentic_hit_rate_pct": ag_hr,
+            "speedup_factor": speedup, "recent": recent}
 
 
 @app.get("/api/metrics/series")
